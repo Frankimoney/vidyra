@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.local
+*.pem
+*.key
+backend/.env
+config/vidyra-firebase-admin.json
+
+# Build output
+frontend/dist/
+dist/
+build/
+
+# Runtime data (job temp work, local copies)
+storage/
+models/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+
+# Logs
+*.log
+
+# Firebase cache
+.fronteme/.firebase/
+
+# Dependency lock files
+frontend/package-lock.json
+
+# Large binary tools
+vidyra-tools/ffmpeg-9.0.1-essentials_build/
+
+# Windows-specific
+nul
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo

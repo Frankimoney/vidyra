@@ -1,0 +1,73 @@
+{
+  "$comment": "Vidyra Piper voice catalog. The backend discovers .onnx files at runtime in VIDYRA_VOICE_DIR (default models/piper), so anything downloaded there appears in the picker without editing this file. This is reference documentation plus the measured cost of each tier.",
+  "$tiers": {
+    "medium": "Fast. Measured RTF ~0.76 on the 4-core CPU host (0.76s of compute per second of audio), ~63MB each. Default, because /create speed matters and the chunking/prosody fixes apply to it at no extra cost.",
+    "high": "Natural but ~5x slower. Measured RTF ~3.7-3.9, so about four minutes of CPU per minute of narration on this host. Worth it for a finished video you keep, not for iterating. Piper renders it at 22050Hz and the pipeline resamples to 48kHz either way."
+  },
+  "$notes": [
+    "There is no en_US-hfc_female-high. For a female voice use en_US-ljspeech-high, or keep en_US-hfc_female-medium.",
+    "en_US-libritts-high is a 904-speaker model, not a single voice. Piper defaults to speaker 0, so it works but offers no variety unless speaker selection is added; it is also the largest and slowest here.",
+    "All en_US Piper voices are 22050Hz mono natively."
+  ],
+  "voices": [
+    {
+      "id": "en_US-lessac-medium",
+      "display": "Lessac",
+      "gender": "male",
+      "tier": "medium",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+    },
+    {
+      "id": "en_US-ryan-medium",
+      "display": "Ryan",
+      "gender": "male",
+      "tier": "medium",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json"
+    },
+    {
+      "id": "en_US-hfc_female-medium",
+      "display": "Hfc Female",
+      "gender": "female",
+      "tier": "medium",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json"
+    },
+    {
+      "id": "en_US-lessac-high",
+      "display": "Lessac",
+      "gender": "male",
+      "tier": "high",
+      "note": "Same reader as the medium model, higher-fidelity training.",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/high/en_US-lessac-high.onnx.json"
+    },
+    {
+      "id": "en_US-ryan-high",
+      "display": "Ryan",
+      "gender": "male",
+      "tier": "high",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx.json"
+    },
+    {
+      "id": "en_US-ljspeech-high",
+      "display": "LJSpeech",
+      "gender": "female",
+      "tier": "high",
+      "note": "Female high-tier option; there is no hfc_female-high.",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx.json"
+    },
+    {
+      "id": "en_US-libritts-high",
+      "display": "LibriTTS",
+      "gender": "unspecified",
+      "tier": "high",
+      "note": "904-speaker model. Piper uses speaker 0 unless a speaker id is passed, so this adds no variety yet and is the slowest and largest option.",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts/high/en_US-libritts-high.onnx",
+      "json_url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts/high/en_US-libritts-high.onnx.json"
+    }
+  ]
+}

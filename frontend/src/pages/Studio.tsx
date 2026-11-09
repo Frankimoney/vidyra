@@ -1,0 +1,915 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../services/api";
+import { watchStudioRuns } from "../services/studioJobs";
+import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../components/feedback";
+import { Badge, Button, Card, EmptyState, Field, Segmented, Spinner } from "../components/ui";
+import { AssetPicker } from "../components/AssetPicker";
+import AspectSelect, { aspectsFromCatalog } from "../components/AspectSelect";
+import type {
+  StudioCatalog,
+  StudioRun,
+  StudioTool,
+} from "../types";
+
+/* ------------------------------------------------------------------ */
+/* Small helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the prompt box means for each tool. Lives in the UI so every tool reads
+ * differently even if the backend catalog predates its hints (the catalog
+ * carries the same copy for API clients; the UI copy wins on mismatch).
+ */
+const PROMPT_COPY: Record<StudioTool, { label: string; placeholder: string }> = {
+  txt2img: {
+    label: "Prompt",
+    placeholder:
+      "Describe the image you want to create — subject, setting, lighting, style, e.g. “a striker scoring at golden hour, cinematic, 8k”…",
+  },
+  img2img: {
+    label: "Restyle direction",
+    placeholder:
+      "How to change the reference image — e.g. “ink-and-grain anime”, “vintage film still”, “pop-art poster”…",
+  },
+  character: {
+    label: "Scene prompt",
+    placeholder:
+      "Describe the scene the locked character appears in — setting, action, lighting…",
+  },
+  voiceclone: {
+    label: "What to say",
+    placeholder:
+      "The line the cloned voice should read, e.g. “Welcome back to the show.” — the voice sample supplies the voice.",
+  },
+  img2video: {
+    label: "Motion prompt",
+    placeholder:
+      "How the still should move — e.g. “slow push-in”, “hair in the wind”, “camera drifts left”…",
+  },
+  motion: {
+    label: "Motion to transfer",
+    placeholder: "Describe the motion / expression to transfer…",
+  },
+  v2v: {
+    label: "Remix direction",
+    placeholder:
+      "What to change in the clip — e.g. “make it rain”, “warmer grade”, “slower motion”…",
+  },
+  lip: {
+    label: "Scene prompt",
+    placeholder:
+      "Setting for the speaker — e.g. “presenter in a studio, medium shot”; the audio drives the mouth.",
+  },
+  lipsync: {
+    label: "Scene prompt",
+    placeholder:
+      "The audio drives the mouth — add a short description of the shot if you need it.",
+  },
+};
+
+function timeAgo(iso: string): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+const SEED_FIELD = { key: "seed", label: "Seed (same seed + prompt = same result)", min: 0, max: 99999999, step: 1 };
+
+/** The shape picker: one control, prepended to every tool that has a canvas. */
+const ASPECT_FIELD = {
+  key: "aspect",
+  label: "Aspect ratio",
+  options: "aspect" as const,
+  hint: "Wan centre-crops the subject to fill the frame. For a full-body reference, pick Pad so nothing is cut off.",
+};
+
+type ParamField =
+  | { key: string; label: string; min: number; max: number; step?: number }
+  | { key: string; label: string; options: "aspect" | "fit"; hint?: string };
+
+const PARAM_FIELDS: Record<string, ParamField[]> = {
+  "txt2img": [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
+    SEED_FIELD,
+  ],
+  "img2img": [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
+    { key: "denoise", label: "Restyle strength", min: 0, max: 1, step: 0.05 },
+    SEED_FIELD,
+  ],
+  "img2video": [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
+    { key: "frames", label: "Frames", min: 16, max: 144, step: 8 },
+    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
+    { key: "denoise", label: "Denoise", min: 0, max: 1, step: 0.05 },
+    SEED_FIELD,
+  ],
+  motion: [
+    ASPECT_FIELD,
+    // Wan-Animate-2 renders in fixed 81-frame windows, so this tool is set in
+    // seconds: the pod works out how many windows that needs and stitches them.
+    { key: "duration", label: "Length (seconds)", min: 3, max: 30, step: 1 },
+    { key: "fps", label: "FPS (0 = match clip)", min: 0, max: 60, step: 1 },
+    { key: "width", label: "Width (0 = match clip)", min: 0, max: 1280, step: 16 },
+    { key: "height", label: "Height (0 = match clip)", min: 0, max: 1280, step: 16 },
+    { key: "steps", label: "Steps", min: 2, max: 12, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 5, step: 0.5 },
+    SEED_FIELD,
+  ],
+  v2v: [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
+    { key: "frames", label: "Frames", min: 16, max: 144, step: 8 },
+    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
+    { key: "denoise", label: "Strength", min: 0, max: 1, step: 0.05 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    SEED_FIELD,
+  ],
+  lip: [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
+    { key: "frames", label: "Frames", min: 16, max: 240, step: 8 },
+    { key: "fps", label: "FPS", min: 16, max: 30, step: 1 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
+    SEED_FIELD,
+  ],
+  "character": [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
+    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
+    { key: "denoise", label: "Portrait strength", min: 0, max: 1, step: 0.05 },
+    SEED_FIELD,
+  ],
+  lipsync: [
+    ASPECT_FIELD,
+    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
+    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
+    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
+  ],
+  "voiceclone": [
+    { key: "exaggeration", label: "Emotion", min: 0, max: 1, step: 0.05 },
+    { key: "cfg_weight", label: "Voice match", min: 0, max: 1, step: 0.05 },
+    SEED_FIELD,
+  ],
+};
+
+// Models inside one tool that need a different control set. Anything listed
+// here replaces the tool's fields entirely.
+const MODEL_PARAM_FIELDS: Record<string, Record<string, typeof PARAM_FIELDS[string]>> = {
+  motion: {
+    // LivePortrait is head-and-shoulders only and runs one pass over the clip,
+    // so there is no stitched-length control.
+    liveportrait: [
+      ASPECT_FIELD,
+      { key: "width", label: "Width", min: 256, max: 768, step: 64 },
+      { key: "height", label: "Height", min: 256, max: 768, step: 64 },
+      { key: "fps", label: "FPS", min: 16, max: 30, step: 1 },
+      { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
+      SEED_FIELD,
+    ],
+  },
+};
+
+function fieldsFor(tool: string, model: string) {
+  return MODEL_PARAM_FIELDS[tool]?.[model] ?? PARAM_FIELDS[tool] ?? [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Ref slot (upload or pick from library)                              */
+/* ------------------------------------------------------------------ */
+
+function RefSlot({
+  label,
+  kind,
+  value,
+  onPick,
+  onClear,
+  busy,
+}: {
+  label: string;
+  kind: "image" | "video" | "audio";
+  value: string | null;
+  onPick: (storagePath: string) => void;
+  onClear: () => void;
+  busy: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const toast = useToast();
+
+  async function loadPreview(path: string) {
+    try {
+      const { url } = await api.preview(path);
+      setPreviewUrl(url);
+    } catch {
+      setPreviewUrl(null);
+    }
+  }
+
+  useEffect(() => {
+    if (value) loadPreview(value);
+    else setPreviewUrl(null);
+  }, [value]);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      if (kind === "audio") {
+        const res = await api.uploadMusic(file, "voice");
+        if (res.storagePath) onPick(res.storagePath);
+        else toast("Upload failed.", "error");
+        return;
+      }
+      const res = await api.uploadFile(file);
+      if (res.items.length > 0) onPick(res.items[0].storagePath);
+      else toast("Upload failed.", "error");
+    } catch (err) {
+      toast((err as Error).message || "Upload failed.", "error");
+    }
+  }
+
+  const accept = kind === "video" ? "video/*" : kind === "audio" ? "audio/*" : "image/*";
+  const isVideo = kind === "video";
+  const isAudio = kind === "audio";
+  const icon = isVideo ? "🎬" : isAudio ? "🎵" : "🖼";
+
+  return (
+    <div className="field">
+      <label className="field-label">{label}</label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        style={{ display: "none" }}
+        onChange={handleFile}
+      />
+      {value ? (
+        <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid var(--line, rgba(255,255,255,0.12))" }}>
+          {previewUrl ? (
+            isVideo ? (
+              <video src={previewUrl} muted playsInline preload="metadata" style={{ width: "100%", maxHeight: 220, objectFit: "cover", display: "block" }} />
+            ) : isAudio ? (
+              <audio src={previewUrl} controls style={{ width: "100%", padding: "18px 8px" }} />
+            ) : (
+              <img src={previewUrl} alt="" style={{ width: "100%", maxHeight: 220, objectFit: "cover", display: "block" }} />
+            )
+          ) : (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)" }}>{busy ? <Spinner /> : "…"}</div>
+          )}
+          <button
+            type="button"
+            onClick={onClear}
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: "none",
+              background: "rgba(0,0,0,0.65)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+            title="Remove"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            style={{
+              flex: 1,
+              padding: "26px 14px",
+              borderRadius: 12,
+              border: "1.5px dashed rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.03)",
+              color: "var(--text-3)",
+              cursor: "pointer",
+              fontSize: "0.9rem",
+            }}
+          >
+            {icon} Upload {label.toLowerCase()}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            style={{
+              flex: 1,
+              padding: "26px 14px",
+              borderRadius: 12,
+              border: "1.5px dashed rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.03)",
+              color: "var(--text-3)",
+              cursor: "pointer",
+              fontSize: "0.9rem",
+            }}
+          >
+            🗂 From library
+          </button>
+        </div>
+      )}
+      <AssetPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(item) => onPick(item.path)}
+        kind={kind === "audio" ? "audio" : kind === "video" ? "video" : "image"}
+        title={`Choose ${label.toLowerCase()}`}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Result viewer                                                       */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Research note                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Renders the provenance of an auto-researched run.
+ *
+ * Two cases the user must be able to tell apart:
+ *  - a real photo was found and restyled, so the Commons attribution is owed;
+ *  - no photo existed, so the figure is fictional and must never read as a
+ *    photograph of a real person.
+ */
+function ResearchNote({ run }: { run: StudioRun }) {
+  const research = run.research;
+  const credits = research?.credits || run.credits;
+  if (!research?.subject && !credits) return null;
+
+  const subject = research?.subject?.trim();
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "8px 10px",
+        borderRadius: 10,
+        background: "var(--surface-2, rgba(127,127,127,0.08))",
+        fontSize: "0.78rem",
+        lineHeight: 1.45,
+      }}
+    >
+      {subject && (
+        <div>
+          <strong>Researched:</strong> {subject}
+          {research?.role ? ` — ${research.role}` : ""}
+          {research?.grounded === false && (
+            <span className="faint"> (from model knowledge — live search unavailable)</span>
+          )}
+        </div>
+      )}
+
+      {credits ? (
+        <div className="faint" style={{ marginTop: 2 }}>
+          Reference photo:{" "}
+          {credits.page_url ? (
+            <a href={credits.page_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+              {credits.title || "Wikimedia Commons"}
+            </a>
+          ) : (
+            credits.title || "Wikimedia Commons"
+          )}
+          {credits.author ? ` · ${credits.author}` : ""}
+          {credits.license ? ` · ${credits.license}` : ""} — restyled, not the original photo.
+        </div>
+      ) : (
+        <div className="faint" style={{ marginTop: 2 }}>
+          No reference photo was available, so this figure is <strong>fictional</strong> — an
+          original character drawn in {subject || "the subject"}&apos;s colours and style, not a
+          picture of a real person.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RunResult({ run }: { run: StudioRun }) {
+  const primary = run.output?.primary;
+  if (!primary) return null;
+
+  if (primary.kind === "image") {
+    return <img src={primary.url} alt={run.title} style={{ width: "100%", borderRadius: 12, display: "block" }} />;
+  }
+  return (
+    <video
+      src={primary.url}
+      controls
+      playsInline
+      preload="metadata"
+      style={{ width: "100%", borderRadius: 12, display: "block", background: "#000" }}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main Studio page                                                    */
+/* ------------------------------------------------------------------ */
+
+export default function Studio() {
+  const { uid } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
+
+  const [catalog, setCatalog] = useState<StudioCatalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [runs, setRuns] = useState<StudioRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(true);
+
+  const [tool, setTool] = useState<StudioTool>("txt2img");
+  const [model, setModel] = useState<string>("");
+  const [prompt, setPrompt] = useState("");
+  const [negative, setNegative] = useState("");
+  const [params, setParams] = useState<Record<string, number | string>>({});
+  const [refs, setRefs] = useState<Record<number, string | null>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<string | null>(null);
+
+  // Internet-grounded image mode — no reference image needed from the user.
+
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .studioCatalog()
+      .then((cat) => {
+        if (cancelled) return;
+        setCatalog(cat);
+        if (cat.tools.length > 0) setTool(cat.tools[0].tool);
+      })
+      .catch((e) => toast(e.message || "Could not load studio catalog.", "error"))
+      .finally(() => !cancelled && setCatalogLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Realtime runs subscription
+  useEffect(() => {
+    if (!uid) return;
+    setRunsLoading(true);
+    const unsub = watchStudioRuns(uid, (list) => {
+      setRuns(list);
+      setRunsLoading(false);
+    });
+    return unsub;
+  }, [uid]);
+
+  const toolSpec = useMemo(() => catalog?.tools.find((t) => t.tool === tool), [catalog, tool]);
+  const refSpecs = useMemo(
+    () => catalog?.modelRefs?.[tool]?.[model] ?? toolSpec?.refs ?? [],
+    [catalog, tool, model, toolSpec]
+  );
+
+  // When tool/model changes, reset model + params to defaults
+  useEffect(() => {
+    if (!toolSpec) return;
+    const firstModel = toolSpec.models[0];
+    setModel(firstModel);
+    const defaults = catalog?.modelParams?.[tool]?.[firstModel] || {};
+    const next: Record<string, number | string> = {};
+    for (const f of fieldsFor(tool, firstModel)) {
+      const dv = (defaults as Record<string, unknown>)[f.key];
+      if ("options" in f) {
+        next[f.key] = typeof dv === "string" ? dv : "auto";
+      } else {
+        next[f.key] = typeof dv === "number" ? dv : (f.min + f.max) / 2;
+      }
+    }
+    setParams(next);
+    setRefs({});
+    setNegative(String((defaults as Record<string, unknown>).negative || ""));
+  }, [tool, catalog]);
+
+  function handleModelChange(m: string) {
+    setModel(m);
+    setRefs({});
+    const defaults = catalog?.modelParams?.[tool]?.[m] || {};
+    const next: Record<string, number | string> = {};
+    for (const f of fieldsFor(tool, m)) {
+      const dv = (defaults as Record<string, unknown>)[f.key];
+      if ("options" in f) {
+        next[f.key] = typeof dv === "string" ? dv : "auto";
+      } else {
+        next[f.key] = typeof dv === "number" ? dv : (f.min + f.max) / 2;
+      }
+    }
+    setParams(next);
+  }
+
+  async function submit() {
+    if (!prompt.trim()) {
+      toast("Enter a prompt first.", "error");
+      return;
+    }
+    const missing = refSpecs.filter((slot, i) => slot.required && !refs[i]);
+    if (missing.length) {
+      toast(`Please provide: ${missing.map((m) => m.label).join(", ")}`, "error");
+      return;
+    }
+    const refList = refSpecs
+      .map((slot, i) => (refs[i] ? { path: refs[i] as string, role: slot.role } : null))
+      .filter((x): x is { path: string; role: string } => !!x);
+
+    // A chosen ratio wins over the manual pixel sliders, so send only the
+    // ratio and let the backend derive the canvas — sending both would be
+    // ambiguous about which one the run should honour.
+    const paramsToSend: Record<string, number | string> = { ...params, negative };
+    const ratioLocked = Boolean(params.aspect && params.aspect !== "auto");
+    if (ratioLocked) {
+      delete paramsToSend.width;
+      delete paramsToSend.height;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await api.createStudioRun({
+        tool,
+        model,
+        prompt: prompt.trim(),
+        params: paramsToSend,
+        refs: refList,
+        title: prompt.trim().slice(0, 60),
+      });
+      setSelectedRun(res.run_id);
+      toast(res.fake ? "Started (fake GPU — local placeholder output)." : "Queued on RunPod GPU.", "success");
+      setPrompt("");
+      setRefs({});
+    } catch (e) {
+      toast((e as Error).message || "Failed to start run.", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+
+  async function removeRun(runId: string) {
+    try {
+      await api.deleteStudioRun(runId);
+      if (selectedRun === runId) setSelectedRun(null);
+      toast("Run deleted.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Delete failed.", "error");
+    }
+  }
+
+
+  // Tell the user what the chosen shape actually renders at, so a ratio is
+  // never a guess. Aspect is resolved server-side; this mirrors that math.
+  const shapeSummary = useMemo(() => {
+    const modelDefaults = catalog?.modelParams?.[tool]?.[model] as
+      | Record<string, unknown>
+      | undefined;
+    const w0 = Number(params.width ?? modelDefaults?.width ?? 0);
+    const h0 = Number(params.height ?? modelDefaults?.height ?? 0);
+    if (!w0 || !h0) return "";
+    if (params.aspect && params.aspect !== "auto") {
+      const ratio = String(params.aspect).split(":").map(Number);
+      if (ratio.length === 2 && ratio[0] > 0 && ratio[1] > 0) {
+        const long = Math.max(w0, h0);
+        const snap = (n: number) => Math.max(16, Math.round(n / 16) * 16);
+        const dims =
+          ratio[0] >= ratio[1]
+            ? { w: snap(long), h: snap((long * ratio[1]) / ratio[0]) }
+            : { w: snap((long * ratio[0]) / ratio[1]), h: snap(long) };
+        return `Output ${dims.w} x ${dims.h} px (${params.aspect})`;
+      }
+    }
+    return `Output ${w0} x ${h0} px`;
+  }, [params.width, params.height, params.aspect, catalog, tool, model]);
+
+  if (catalogLoading) {
+    return (
+      <div style={{ display: "grid", placeItems: "center", minHeight: "40dvh" }}>
+        <Spinner />
+      </div>
+    );
+  }
+
+  const disabled = !catalog?.enabled;
+  const fields = fieldsFor(tool, model);
+
+  return (
+    <div className="fade-up">
+      <header style={{ marginBottom: 18 }}>
+        <h2 style={{ marginTop: 0 }}>AI Studio</h2>
+        <p className="faint" style={{ fontSize: "0.88rem", marginTop: -4 }}>
+          {disabled
+            ? "GPU not configured — set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID on the backend to enable."
+            : catalog?.fake
+            ? "Running in fake-GPU mode (local placeholder outputs, no RunPod charges)."
+            : "Powered by RunPod Serverless GPU. Each run bills GPU seconds."}
+        </p>
+      </header>
+
+      {disabled ? (
+        <EmptyState icon="🔌" title="AI Studio is offline" hint="Configure the backend RunPod credentials to unlock the five AI tools." />
+      ) : (
+        <div style={{ display: "grid", gap: 18, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <Card>
+            <Segmented
+              options={(catalog?.tools || []).map((t) => t.tool as StudioTool)}
+              value={tool}
+              onChange={(t) => setTool(t)}
+            />
+
+            <div style={{ marginTop: 14 }}>
+              <Field label="Model">
+                <select
+                  className="input"
+                  value={model}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                >
+                  {(toolSpec?.models || []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <div style={{ marginTop: 6 }}>
+              <Field label={PROMPT_COPY[tool]?.label || toolSpec?.promptLabel || "Prompt"}>
+                <textarea
+                  className="textarea"
+                  rows={3}
+                  placeholder={
+                    PROMPT_COPY[tool]?.placeholder ||
+                    toolSpec?.promptHint ||
+                    "Describe the video you want (style, motion, mood)…"
+                  }
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                />
+              </Field>
+            </div>
+
+            {tool !== "motion" && (
+              <div style={{ marginTop: 6 }}>
+                <Field label="Negative prompt (optional)">
+                  <input
+                    className="input"
+                    placeholder="blurry, low quality, watermark…"
+                    value={negative}
+                    onChange={(e) => setNegative(e.target.value)}
+                  />
+</Field>
+              {(tool === "txt2img" || tool === "img2img") && (
+                <p className="faint" style={{ fontSize: "0.78rem", margin: "2px 0 0" }}>
+                  Name a real person, team or place — or paste an article — and Vidyra
+                  researches it automatically: if a freely licensed photo exists it is
+                  restyled into your graphic, otherwise an original character in that
+                  subject&apos;s own colours and symbols is drawn instead.
+                </p>
+              )}
+              </div>
+            )}
+
+            {/* Media refs */}
+            {refSpecs.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                {refSpecs.map((slot, i) => (
+                  <RefSlot
+                    key={`${tool}-${slot.role}`}
+                    label={slot.required ? slot.label : `${slot.label} (optional)`}
+                    kind={slot.kind}
+                    value={refs[i] || null}
+                    onPick={(path) => setRefs((prev) => ({ ...prev, [i]: path }))}
+                    onClear={() => setRefs((prev) => ({ ...prev, [i]: null }))}
+                    busy={submitting}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Numeric params */}
+            {fields.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 8 }}>
+                {fields.map((f) => {
+                  // Raw pixel controls are redundant once a ratio is chosen —
+                  // the backend derives width/height from it — so they hide.
+                  if (
+                    (f.key === "width" || f.key === "height") &&
+                    params.aspect &&
+                    params.aspect !== "auto"
+                  ) {
+                    return null;
+                  }
+                  if ("options" in f) {
+                    const opts =
+                      f.options === "aspect"
+                        ? aspectsFromCatalog(catalog?.paramOptions)
+                        : (catalog?.paramOptions?.fit ?? ["crop", "pad"]).map((v) => ({
+                            value: v,
+                            label: catalog?.paramOptions?.fitLabels?.[v] ?? v,
+                          }));
+                    return (
+                      <AspectSelect
+                        key={f.key}
+                        id={`studio-${f.key}`}
+                        label={f.label}
+                        hint={f.hint}
+                        choices={opts}
+                        value={String(params[f.key] ?? "auto")}
+                        onChange={(v) =>
+                          setParams((prev) => ({ ...prev, [f.key]: v }))
+                        }
+                      />
+                    );
+                  }
+                  return (
+                    <div key={f.key}>
+                      <div className="spread" style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+                        <span className="faint">{f.label}</span>
+                        <span style={{ fontWeight: 700 }}>{params[f.key] ?? "—"}</span>
+                      </div>
+                      <input
+                        type="range"
+                        className="slider"
+                        min={f.min}
+                        max={f.max}
+                        step={f.step || 1}
+                        value={params[f.key] ?? f.min}
+                        onChange={(e) =>
+                          setParams((prev) => ({ ...prev, [f.key]: Number(e.target.value) }))
+                        }
+                        style={{ width: "100%" }}
+                      />
+                    </div>
+                  );
+                })}
+                {shapeSummary && (
+                  <p
+                    className="faint"
+                    style={{ fontSize: "0.78rem", margin: "2px 0 0", fontWeight: 600 }}
+                  >
+                    {shapeSummary}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div style={{ marginTop: 16 }}>
+              <Button variant="primary" size="lg" loading={submitting} onClick={submit}>
+                {catalog?.fake ? "Run (fake GPU)" : "Run on GPU"}
+              </Button>
+            </div>
+          </Card>
+
+          {/* Runs list */}
+          <div>
+            <h3 className="section-title" style={{ marginBottom: 10 }}>
+              Recent runs
+            </h3>
+            {runsLoading ? (
+              <EmptyState icon="⏳" title="Loading runs…" />
+            ) : runs.length === 0 ? (
+              <EmptyState icon="🎬" title="No studio runs yet" hint="Your generated images and videos will appear here." />
+            ) : (
+              <div className="stack-v">
+                {runs.map((run) => (
+                  <Card key={run.run_id}>
+                    <div className="spread">
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {run.title || run.prompt || "Untitled"}
+                        </div>
+                        <div className="faint" style={{ fontSize: "0.8rem", marginTop: 2 }}>
+                          {run.tool} · {run.model} · {timeAgo(run.created_at)}
+                        </div>
+                        {run.credits && (
+                          <div
+                            className="faint"
+                            style={{ fontSize: "0.75rem", marginTop: 2, wordBreak: "break-word" }}
+                          >
+                            Ref: {run.credits.title} · {run.credits.license}
+                          </div>
+                        )}
+                      </div>
+                      <Badge status={run.status} />
+                    </div>
+
+                    {(run.status === "processing" || run.status === "queued") && (
+                      <div className="progress-track" style={{ marginTop: 10 }}>
+                        <div className="progress-fill" style={{ width: `${run.progress}%` }} />
+                      </div>
+                    )}
+
+                    {run.status === "failed" && run.error && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          fontSize: "0.84rem",
+                          color: "var(--danger, #f87171)",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {run.error}
+                      </div>
+                    )}
+
+                    {run.status === "completed" && (
+                      <div style={{ marginTop: 12 }}>
+                        <RunResult run={run} />
+                        <ResearchNote run={run} />
+                        <div className="spread" style={{ marginTop: 8 }}>
+                          <a
+                            href={run.output?.primary?.url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "var(--accent)", fontSize: "0.85rem" }}
+                          >
+                            Open full size ↗
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => removeRun(run.run_id)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "var(--text-3)",
+                              cursor: "pointer",
+                              fontSize: "0.84rem",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                        {run.output?.primary && (
+                          <div style={{ marginTop: 10 }}>
+                            <Button
+                              variant="primary"
+                              onClick={() => {
+                                const p = run.output!.primary!;
+                                navigate("/create", {
+                                  state: {
+                                    preload: {
+                                      path: p.storagePath,
+                                      name: p.name,
+                                      kind: p.kind,
+                                      size: p.size,
+                                      url: p.url,
+                                      duration: p.duration,
+                                    },
+                                  },
+                                });
+                              }}
+                            >
+                              ➕ Use in video
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

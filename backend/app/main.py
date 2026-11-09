@@ -1,0 +1,145 @@
+"""FastAPI application entry point."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import settings
+from .routes import films, health, jobs, me, public, recipes, studio, uploads, usage, workspaces
+from .services import cleanup
+from .services.firebase import firebase
+from .services.storage import get_storage_driver
+from .workers.film_worker import FilmWorker
+from .workers.studio_worker import StudioWorker
+from .workers.video_worker import VideoWorker
+
+
+cleanup_task: asyncio.Task | None = None
+
+
+async def _cleanup_loop(app: FastAPI):
+    while True:
+        try:
+            await asyncio.to_thread(
+                cleanup.clean_expired_jobs,
+                app.state.settings,
+                app.state.storage,
+            )
+            await asyncio.to_thread(
+                cleanup.clean_orphaned_media,
+                app.state.settings,
+                app.state.storage,
+            )
+        except Exception as exc:
+            print(f"[cleanup] error: {exc}")
+        await asyncio.sleep(
+            max(1, app.state.settings.cleanup_interval_hours) * 3600
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings.ensure_dirs()
+    app.state.settings = settings
+    app.state.firebase = firebase
+    app.state.storage = get_storage_driver(settings)
+    app.state.worker = VideoWorker(settings, app.state.storage)
+    app.state.studio_worker = StudioWorker(settings, app.state.storage)
+    # Cloned-voice narration reuses the Studio queue — no separate GPU path.
+    app.state.worker.studio_worker = app.state.studio_worker
+    app.state.film_worker = FilmWorker(settings, app.state.storage, app.state.worker, app.state.studio_worker)
+
+    # Firebase must be initialized before recovery: without it the job store is
+    # the dev in-memory dict, which a restart empties anyway.
+    firebase_ready = firebase.init()
+    if firebase_ready:
+        print("Firebase Admin initialized.")
+    else:
+        print(
+            "WARNING: Firebase credentials not found. "
+            "Jobs will run only in dev mode (no cloud storage)."
+        )
+
+    # Anything still queued or processing was owned by the process that just
+    # died. Nothing is claiming it now, so record that honestly instead of
+    # letting it look like live work forever.
+    if firebase_ready:
+        try:
+            stranded = await asyncio.to_thread(cleanup.fail_interrupted_jobs)
+            if stranded:
+                print(
+                    f"Marked {stranded} interrupted job(s)/run(s) as failed. "
+                    "Start them again to render from the beginning."
+                )
+        except Exception as exc:
+            print(f"WARNING: could not reconcile interrupted jobs: {exc!r}")
+
+    if settings.dev_mode:
+        print("VIDYRA backend running in DEVELOPMENT mode.")
+
+    global cleanup_task
+    cleanup_task = asyncio.create_task(_cleanup_loop(app))
+    yield
+    if cleanup_task:
+        cleanup_task.cancel()
+
+
+app = FastAPI(
+    title="Vidyra API",
+    description="AI sports-video generation backend (FastAPI + FFmpeg).",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health.router, prefix="/api", tags=["system"])
+app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(uploads.router, prefix="/api", tags=["uploads"])
+app.include_router(me.router, prefix="/api", tags=["profile"])
+app.include_router(public.router, prefix="/api", tags=["public"])
+app.include_router(studio.router, prefix="/api", tags=["studio"])
+app.include_router(films.router, prefix="/api", tags=["films"])
+app.include_router(workspaces.router, prefix="/api", tags=["workspaces"])
+app.include_router(usage.router, prefix="/api", tags=["usage"])
+app.include_router(recipes.router, prefix="/api", tags=["recipes"])
+
+if settings.frontend_dir and os.path.isdir(settings.frontend_dir):
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from starlette.staticfiles import StaticFiles
+
+    class SPAStaticFiles(StaticFiles):
+        """Serve the built SPA, falling back to index.html for client routes."""
+
+        async def get_response(self, path, scope):
+            try:
+                response = await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                    return await super().get_response("index.html", scope)
+                raise
+            if response.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                return await super().get_response("index.html", scope)
+            return response
+
+    app.mount(
+        "/",
+        SPAStaticFiles(directory=settings.frontend_dir, html=True),
+        name="frontend",
+    )
+
+
+@app.get("/")
+async def root():
+    return {"name": "Vidyra API", "docs": "/docs", "health": "/api/health"}

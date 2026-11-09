@@ -1,0 +1,9 @@
+Backend running at http://127.0.0.1:8000
+Starting public tunnel...
+
+============================================================
+  PUBLIC URL - open this from any device, anywhere:
+  https://accommodations-verbal-violations-unique.trycloudflare.com
+============================================================
+Keep this window open while you use the app.
+Press Ctrl+C to stop public access for today.

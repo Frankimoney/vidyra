@@ -1,0 +1,24 @@
+@@ -15,7 +15,13 @@
+     wavfile.write(path, sr, wav.astype(np.int16))
+ 
+ def save_wavenet_wav(wav, path, sr):
+-    librosa.output.write_wav(path, wav, sr=sr)
++    # librosa.output.write_wav was removed in librosa 1.0; soundfile is the
++    # supported replacement and is already a hard dependency of librosa.
++    try:
++        import soundfile
++        soundfile.write(path, wav, sr)
++    except ImportError:
++        librosa.output.write_wav(path, wav, sr=sr)
+ 
+ def preemphasis(wav, k, preemphasize=True):
+     if preemphasize:
+@@ -97,7 +103,7 @@
+ 
+ def _build_mel_basis():
+     assert hp.fmax <= hp.sample_rate // 2
+-    return librosa.filters.mel(hp.sample_rate, hp.n_fft, n_mels=hp.num_mels,
++    return librosa.filters.mel(sr=hp.sample_rate, n_fft=hp.n_fft, n_mels=hp.num_mels,
+                                fmin=hp.fmin, fmax=hp.fmax)
+ 
+ def _amp_to_db(x):

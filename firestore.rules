@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A helper to check the request's authenticated uid
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ---- User profiles (unused for now but reserved) ----
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
+    // ---- Videos / jobs ----
+    match /videos/{jobId} {
+      // Users may create jobs for themselves
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      // Owners may read/update/delete their own jobs
+      allow read, update, delete: if
+        isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ---- Planning projects ----
+    // Chat threads and production plans are read and written exclusively by
+    // the backend (the agent validates plans server-side, and the API returns
+    // them already shaped for the UI). No rule matches here on purpose, which
+    // leaves the collection default-denied to client SDKs.
+
+    // ---- Character library ----
+    // The shared registry is server-owned for the same reason: one canonical
+    // identity per character is enforced on write, and reference images are
+    // validated against the user's own storage paths. Client reads go through
+    // GET /api/characters, which applies the same ownership check.
+  }
+}

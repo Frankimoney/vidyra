@@ -1,0 +1,37 @@
+// ===========================================================================
+// NOT USED by default. Firebase Cloud Storage requires the Blaze (paid) plan
+// since Feb 3, 2026, so Vidyra stores media + finished videos on the backend
+// server's disk instead (STORAGE_BACKEND=local) and serves them via signed
+// APIs. These rules only matter if you set STORAGE_BACKEND=firebase after
+// upgrading to Blaze; you may delete this file otherwise.
+// ===========================================================================
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    // ---- User media uploads ----
+    // Path pattern: media/{userId}/{uploadId}/{filename}
+    match /media/{userId}/{uploadId}/{filename} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size <= 50 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpg|jpeg|png|webp)|video/(mp4|quicktime|x-matroska)');
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ---- Finished videos ----
+    // Backend writes with the Admin SDK (bypasses rules); reads/overwrites to owner.
+    match /videos/{userId}/{jobId}/{file} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}

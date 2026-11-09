@@ -1,0 +1,6 @@
+tunnel: TUNNEL_ID
+credentials-file: C:/Users/NWAJI/.cloudflared/TUNNEL_ID.json
+ingress:
+  - hostname: api.YOURDOMAIN.COM
+    service: http://127.0.0.1:8000
+  - service: http_status:404

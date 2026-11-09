@@ -1,0 +1,989 @@
+:root {
+  /* Palette */
+  --bg: #0b0e13;
+  --bg-elev: #11151d;
+  --surface: #161b26;
+  --surface-2: #1c2332;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --primary: #8b5cf6;
+  --primary-strong: #a78bfa;
+  --accent: #22d3ee;
+  --gradient: linear-gradient(135deg, #8b5cf6 0%, #22d3ee 100%);
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --queue: #fbbf24;
+
+  --text: #f6f8fc;
+  --text-2: #a2adc2;
+  --text-3: #5d6a82;
+
+  --radius: 16px;
+  --radius-lg: 22px;
+  --radius-sm: 10px;
+
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 8px 32px rgba(139, 92, 246, 0.35);
+
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  --bottom-nav-h: 68px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* One width for the nav and the page content, so the logo, nav labels and
+     page content share the same left and right edges. 1200px looked
+     edge-to-edge on a 1366px laptop — only ~83px of margin each side. */
+  --shell-max: 1120px;
+  --shell-pad: 32px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  overscroll-behavior-y: none;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+/* ---------- App shell ---------- */
+
+.app-shell {
+  width: 100%;
+  max-width: 100%;
+  min-height: 100dvh;
+  position: relative;
+  background: linear-gradient(180deg, #0d1120 0%, var(--bg) 40%);
+}
+
+.app-main {
+  padding: 20px 18px calc(var(--bottom-nav-h) + var(--safe-bottom) + 24px);
+  min-height: 100dvh;
+}
+
+/* ---------- Top nav (desktop) ---------- */
+
+.top-nav {
+  display: none;
+}
+
+.top-nav-inner {
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px var(--shell-pad);
+}
+
+.top-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* The nav holds every destination in one row. Without these two lines its
+     min-content width (labels are nowrap) pushes the whole page wider than
+     the viewport, which slides the right-hand items off-screen. Let the row
+     shrink and scroll inside itself instead. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.top-nav-links::-webkit-scrollbar {
+  display: none;
+}
+
+.top-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  /* Never squash a label to fit — the row scrolls instead of truncating. */
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.top-link:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.top-link.active {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.top-link.active svg {
+  color: var(--primary-strong);
+}
+
+/* Laptop widths: the top nav appears at 768px but every destination in one row
+   needs more room than that. Tighten the chrome so the full bar still fits
+   before it has to scroll. */
+@media (min-width: 768px) and (max-width: 1240px) {
+  /* Narrow the gutter for both, so the nav and the page content stay on the
+     same edges through this band. */
+  :root {
+    --shell-pad: 20px;
+  }
+
+  .top-nav-inner {
+    padding: 12px var(--shell-pad);
+    gap: 14px;
+  }
+
+  .top-link {
+    padding: 9px 8px;
+    gap: 5px;
+    font-size: 0.8rem;
+  }
+}
+
+/* Below 960px even the tightened labels no longer fit with enough margin, and
+   on desktop the top nav is the only navigation — so a hidden or scrolled-off
+   destination would be unreachable. Drop to icons and keep them all on screen. */
+@media (min-width: 768px) and (max-width: 959px) {
+  /* Visually hidden rather than display:none — that would strip the label from
+     the accessibility tree and leave the link with no accessible name. */
+  .top-link-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .top-link {
+    padding: 9px 10px;
+  }
+}
+
+/* ---------- Typography ---------- */
+
+h1,
+h2,
+h3,
+.logo {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.logo {
+  font-weight: 800;
+  font-size: 1.24rem;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo .bolt {
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.muted {
+  color: var(--text-2);
+}
+.faint {
+  color: var(--text-3);
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(10px);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.2s ease;
+  user-select: none;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: var(--gradient);
+  border: none;
+  color: #fff;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+.btn-lg {
+  padding: 17px 20px;
+  font-size: 1.05rem;
+  border-radius: var(--radius-lg);
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+}
+.btn-row .btn {
+  flex: 1;
+}
+
+/* ---------- Inputs ---------- */
+
+.input,
+.textarea,
+select.input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  padding: 13px 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input:focus,
+.textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 140px;
+  line-height: 1.55;
+}
+
+label.field-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  margin: 0 0 8px;
+}
+
+.field {
+  margin-bottom: 20px;
+}
+
+/* ---------- Segmented control ---------- */
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px;
+  scrollbar-width: none;
+}
+.segmented::-webkit-scrollbar {
+  display: none;
+}
+
+.seg-btn {
+  flex: 1 1 auto;
+  white-space: normal;
+  text-align: center;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.86rem;
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.seg-btn.active {
+  background: var(--gradient);
+  color: #fff;
+}
+
+/* ---------- Slider ---------- */
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  outline: none;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--gradient);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+/* ---------- Toggle ---------- */
+
+.toggle {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  transition: background 0.2s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle.on {
+  background: var(--gradient);
+  border-color: transparent;
+}
+
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+
+.toggle.on::after {
+  transform: translateX(21px);
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 2px;
+}
+
+/* ---------- Tags / status ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 99px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-completed {
+  background: rgba(52, 211, 153, 0.14);
+  color: var(--success);
+}
+.badge-processing {
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--accent);
+}
+.badge-queued {
+  background: rgba(251, 191, 36, 0.14);
+  color: var(--warning);
+}
+.badge-failed {
+  background: rgba(248, 113, 113, 0.14);
+  color: var(--danger);
+}
+
+/* ---------- Progress ---------- */
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--gradient);
+  transition: width 0.5s ease;
+}
+
+.progress-ring {
+  position: relative;
+}
+
+/* ---------- Thumbnails ---------- */
+
+.thumb {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.thumb img,
+.thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---------- Bottom nav ---------- */
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  background: rgba(13, 17, 26, 0.92);
+  border-top: 1px solid var(--border);
+  padding: 8px 8px calc(6px + var(--safe-bottom));
+  z-index: 50;
+  backdrop-filter: blur(16px);
+}
+
+/* ---------- Phone → desktop nav swap (768px) ----------
+   Below this the app is a phone layout: a fixed bottom tab bar and the main
+   column padding that reserves room for it. At and above it the tabs are
+   replaced by the sticky top nav and that reserved space is given back.
+
+   This block must stay AFTER the `.bottom-nav` and `.top-nav` base rules
+   above — at equal specificity the later rule wins, so putting the override
+   above them silently does nothing. */
+@media (min-width: 768px) {
+  .bottom-nav {
+    display: none;
+  }
+
+  .top-nav {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    background: rgba(11, 14, 19, 0.85);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-shell {
+    box-shadow: none;
+  }
+
+  .app-main {
+    width: 100%;
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    /* No tab bar to clear, so drop the reserved gutter. */
+    padding: 28px var(--shell-pad) 64px;
+  }
+}
+
+.nav-item {
+  flex: 1;
+  /* Let a label shrink/wrap instead of forcing the bar wider than the
+     viewport — the bottom nav now carries five slots. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease;
+}
+
+.nav-item.active {
+  color: var(--text);
+}
+
+.nav-item.active svg {
+  color: var(--primary-strong);
+}
+
+/* ---------- More bottom sheet (mobile) ---------- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 70;
+}
+
+.more-sheet {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.96);
+  width: min(92vw, 400px);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 8px;
+  z-index: 71;
+  opacity: 0;
+  visibility: hidden;
+  transition: transform 0.2s ease, opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.more-sheet.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.more-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+}
+
+.more-sheet-close {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.sheet-item:hover,
+.sheet-item.active {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.sheet-item.active svg {
+  color: var(--primary-strong);
+}
+
+@media (min-width: 900px) {
+  .sheet-backdrop,
+  .more-sheet {
+    display: none;
+  }
+}
+
+/* ---------- Hero ---------- */
+
+.hero {
+  position: relative;
+  border-radius: var(--radius-lg);
+  padding: 28px 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(120% 120% at 20% 0%, rgba(139, 92, 246, 0.28) 0%, transparent 55%),
+    radial-gradient(120% 120% at 100% 100%, rgba(34, 211, 238, 0.18) 0%, transparent 50%),
+    var(--surface);
+}
+
+.hero h2 {
+  font-size: 1.7rem;
+  line-height: 1.15;
+  margin: 0 0 8px;
+}
+
+.hero .tagline {
+  color: var(--text-2);
+  font-size: 0.98rem;
+  margin: 0 0 20px;
+}
+
+/* ---------- Misc ---------- */
+
+.stack-v {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stack-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--surface-2);
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pulse {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-3);
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.6rem;
+  color: #fff;
+}
+
+.section-title {
+  font-size: 1.05rem;
+  margin: 26px 0 12px;
+}
+
+/* ---------- Home: video grid + extras ---------- */
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+@media (min-width: 900px) {
+  .video-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 18px;
+  }
+}
+
+.dur-chip {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 99px;
+  background: rgba(10, 10, 14, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+/* Each tile stacks an icon, a label and a hint, so three across leaves the
+   text too cramped to read on a phone. Step down to two, then one. */
+@media (max-width: 900px) {
+  .quick-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quick-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 14px;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.12s ease, border-color 0.15s ease;
+}
+
+.quick-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+}
+
+.stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stat-chip {
+  flex: 1 1 0;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.stat-num {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+}
+
+.h-rail {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  margin: 0 -18px;
+  padding: 4px 18px 8px;
+  scrollbar-width: none;
+}
+
+.h-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.h-rail > * {
+  scroll-snap-align: start;
+}
+
+@media (min-width: 900px) {
+  .h-rail {
+    margin: 0;
+    padding: 4px 0 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    overflow-x: visible;
+  }
+
+  .h-rail > * {
+    flex: none;
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.35s ease both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+a {
+  color: inherit;
+}
+
+.draft-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.draft-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .draft-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .draft-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .app-main {
+    padding: 16px 14px calc(var(--bottom-nav-h) + var(--safe-bottom) + 22px);
+  }
+}
+
+/* Phones: a .spread row holds its children on one line, so any row wider than
+   the screen forces the whole page sideways and the right-hand side gets cut
+   off. Let these rows stack instead. `.spread` is a shared utility used across
+   every page, so this has to be fixed here rather than per component.
+
+   NOTE: this block must stay AFTER the base rules it overrides. At equal
+   specificity the later rule wins, so a responsive block placed above its own
+   base rule is silently dead. `.grid-2` is intentionally not touched here —
+   the existing `max-width: 480px` block at the end of this file handles it. */
+@media (max-width: 767px) {
+  .spread {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* A wrapped row's child keeps its max-content width, so a long label can
+     still outrun the row. Cap it. */
+  .spread > * {
+    max-width: 100%;
+  }
+}
