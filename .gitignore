@@ -51,3 +51,8 @@ nul
 __pycache__/
 *.pyc
 *.pyo
+# Generated local signed-URL secret
+storage/**/.signing_secret
+
+# Online storage credentials
+backend/config/storage.env

@@ -18,7 +18,7 @@ $env:FIREBASE_PROJECT_ID = 'vidyra'
 $env:SERVICE_ACCOUNT_PATH = "$root\backend\config\vidyra-firebase-adminsdk-fbsvc-31c93a2e64.json"
 $env:GOOGLE_APPLICATION_CREDENTIALS = $env:SERVICE_ACCOUNT_PATH
 $env:APP_ENV = 'development'
-$env:DEV_API_KEY = 'vidyra-dev-key'
+# No static dev API key: the public tunnel must use Firebase ID tokens.
 $env:CORS_ORIGINS = 'http://localhost:5173,http://localhost:4173,http://192.168.43.176:5173,https://vidyra.web.app'
 $env:STORAGE_BACKEND = 'local'
 $env:STORAGE_ROOT = "$root\storage\data"
@@ -37,6 +37,22 @@ $studioEnv = "$root\backend\config\studio.env"
 if (Test-Path $studioEnv) {
   Write-Output "Loading AI Studio config from $studioEnv"
   Get-Content $studioEnv | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and -not $line.StartsWith('#') -and $line.Contains('=')) {
+      $i = $line.IndexOf('=')
+      $k = $line.Substring(0, $i).Trim()
+      $v = $line.Substring($i + 1).Trim().Trim('"')
+      Set-Item -Path "env:$k" -Value $v
+    }
+  }
+}
+
+# Optional online storage: backend\config\storage.env overrides local disk.
+# Copy storage.env.example to storage.env and set STORAGE_BACKEND=s3.
+$storageEnv = Join-Path $root "backend\config\storage.env"
+if (Test-Path $storageEnv) {
+  Write-Output "Loading storage config from $storageEnv"
+  Get-Content $storageEnv | ForEach-Object {
     $line = $_.Trim()
     if ($line -and -not $line.StartsWith('#') -and $line.Contains('=')) {
       $i = $line.IndexOf('=')

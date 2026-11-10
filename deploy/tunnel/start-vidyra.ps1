@@ -8,7 +8,6 @@ $tunerr = Join-Path $root "deploy\tunnel\tunnel.err.log"
 
 function Start-Backend {
     $env:APP_ENV = "development"
-    $env:DEV_API_KEY = "vidyra-dev-key"
     $env:CORS_ORIGINS = "http://localhost:5173,http://localhost:4173,https://vidyra.web.app"
     $env:FIREBASE_PROJECT_ID = "vidyra"
     $env:SERVICE_ACCOUNT_PATH = Join-Path $root "backend\config\vidyra-firebase-adminsdk-fbsvc-31c93a2e64.json"
@@ -23,6 +22,16 @@ function Start-Backend {
     $env:FRONTEND_URL = "http://localhost:5173"
     $env:VIDYRA_VOICE_DIR = Join-Path $root "models\piper"
     $env:PATH = (Join-Path $root ".venv\Scripts") + ";" + (Join-Path $root "vidyra-tools\ffmpeg-9.0.1-essentials_build\bin") + ";" + $env:PATH
+    $storageEnv = Join-Path $root "backend\config\storage.env"
+    if (Test-Path $storageEnv) {
+        Get-Content $storageEnv | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith('#') -and $line.Contains('=')) {
+                $i = $line.IndexOf('=')
+                Set-Item -Path ("env:" + $line.Substring(0, $i).Trim()) -Value $line.Substring($i + 1).Trim().Trim('"')
+            }
+        }
+    }
     Start-Process -FilePath $py -ArgumentList "-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8000" -WorkingDirectory $root -RedirectStandardError $backlog -WindowStyle Hidden
 }
 

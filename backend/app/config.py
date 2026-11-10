@@ -44,6 +44,13 @@ class Settings:
     )
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     signed_url_secret: str = os.getenv("SIGNED_URL_SECRET", "")
+    # S3-compatible storage (Runpod network volume, MinIO, AWS S3).
+    s3_endpoint_url: str = os.getenv("S3_ENDPOINT_URL", "")
+    s3_region: str = os.getenv("S3_REGION", "")
+    s3_bucket: str = os.getenv("S3_BUCKET", "")
+    s3_access_key: str = os.getenv("S3_ACCESS_KEY", "")
+    s3_secret_key: str = os.getenv("S3_SECRET_KEY", "")
+    s3_clock_offset_seconds: float = float(os.getenv("S3_CLOCK_OFFSET_SECONDS", "0") or 0)
     work_root: str = os.getenv("WORK_ROOT", "storage/work")
     output_public_dir: str = os.getenv("OUTPUT_PUBLIC_DIR", "storage/public")
     max_media_count: int = int(os.getenv("MAX_MEDIA_COUNT", "60"))
@@ -58,6 +65,9 @@ class Settings:
     voice_dir: str = os.getenv("VIDYRA_VOICE_DIR", "models/piper")
     music_dir: str = os.getenv("VIDYRA_MUSIC_DIR", "config/music")
     whisper_model: str = os.getenv("VIDYRA_WHISPER_MODEL", "base")
+    # "runpod" sends caption transcription to the GPU worker; "local" keeps it
+    # on the backend CPU.
+    whisper_backend: str = os.getenv("WHISPER_BACKEND", "runpod").strip().lower()
 
     frontend_dir: str = os.getenv("VIDYRA_FRONTEND_DIR", "")
 
@@ -126,7 +136,23 @@ class Settings:
         if self.signed_url_secret:
             return self.signed_url_secret
         if self.dev_mode:
-            return "vidyra-dev-signing-secret-do-not-use-in-prod"
+            # Persist a random secret per install. A hardcoded dev secret would
+            # let anyone who knows a storage path forge media URLs.
+            import secrets as _secrets
+
+            os.makedirs(self.work_root, exist_ok=True)
+            path = os.path.join(self.work_root, ".signing_secret")
+            try:
+                if os.path.isfile(path):
+                    value = open(path, "r", encoding="utf-8").read().strip()
+                    if value:
+                        return value
+                value = _secrets.token_hex(32)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(value)
+                return value
+            except OSError:
+                return _secrets.token_hex(32)
         raise RuntimeError("SIGNED_URL_SECRET must be set in production")
 
     def ensure_dirs(self):

@@ -29,6 +29,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1343,6 +1344,8 @@ def handler(job):
             return _run_voiceclone(inputs, base, art_path, token, report, start)
         if inputs.get("tool") == "lipsync":
             return _run_lipsync(inputs, base, art_path, token, report, start)
+        if inputs.get("tool") == "transcribe":
+            return _run_transcribe(inputs, report, start)
 
         report(5, "Preparing GPU")
         _wait_for_comfy()
@@ -1398,6 +1401,93 @@ def handler(job):
         "elapsed": round(time.time() - start, 1),
         "uploads": uploaded,
     }
+
+
+_WHISPER_MODELS = {}
+
+
+def _get_whisper(model_size: str):
+    from faster_whisper import WhisperModel
+
+    key = model_size or "base"
+    model = _WHISPER_MODELS.get(key)
+    if model is not None:
+        return model
+    download_root = os.getenv("WHISPER_DOWNLOAD_ROOT") or (
+        "/runpod-volume/models/whisper" if os.path.isdir("/runpod-volume") else None
+    )
+    if download_root:
+        os.makedirs(download_root, exist_ok=True)
+    try:
+        model = WhisperModel(
+            key,
+            device="cuda",
+            compute_type="float16",
+            download_root=download_root,
+        )
+    except Exception:
+        # Older GPUs / missing cuDNN: int8 on GPU is slower but works.
+        model = WhisperModel(
+            key,
+            device="cuda",
+            compute_type="int8_float16",
+            download_root=download_root,
+        )
+    _WHISPER_MODELS[key] = model
+    return model
+
+
+def _run_transcribe(inputs, report, start):
+    """Word-timestamp transcription for karaoke captions.
+
+    Called through /runsync: the backend uploads a 16 kHz mono FLAC to storage
+    and passes a signed URL, then reads the words straight from the response.
+    """
+    url = inputs.get("audio_url") or ""
+    if not url:
+        raise RuntimeError("transcribe needs audio_url")
+    model_size = inputs.get("model") or "base"
+    report(10, "Fetching narration")
+    tmp = os.path.join(tempfile.gettempdir(), f"whisper_{os.getpid()}_{int(time.time())}.flac")
+    try:
+        with urllib.request.urlopen(url, timeout=300) as resp, open(tmp, "wb") as fh:
+            shutil.copyfileobj(resp, fh)
+        report(35, "Transcribing")
+        model = _get_whisper(model_size)
+        segments, info = model.transcribe(
+            tmp,
+            language="en",
+            word_timestamps=True,
+            vad_filter=True,
+            beam_size=1,
+        )
+        words = []
+        for segment in segments:
+            for word in getattr(segment, "words", None) or []:
+                text = str(getattr(word, "word", "") or "").strip()
+                if not text:
+                    continue
+                words.append(
+                    {
+                        "word": text,
+                        "start": float(getattr(word, "start", 0) or 0),
+                        "end": float(getattr(word, "end", 0) or 0),
+                    }
+                )
+        if not words:
+            raise RuntimeError("Whisper returned no word timestamps")
+        report(95, "Transcription ready")
+        return {
+            "status": "ok",
+            "words": words,
+            "language": getattr(info, "language", "en"),
+            "elapsed": round(time.time() - start, 1),
+        }
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _run_voiceclone(inputs, base, art_path, token, report, start):

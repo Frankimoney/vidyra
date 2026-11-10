@@ -125,7 +125,7 @@ class VideoWorker:
                     message=message or stage,
                 )
 
-            whisper = self._get_whisper() if getattr(settings, "captions", False) else None
+            whisper = None
 
             output_path = generate_video(
                 settings,
@@ -280,7 +280,7 @@ class VideoWorker:
                 message=message or stage,
             )
 
-        whisper = self._get_whisper() if getattr(settings, "captions", False) else None
+        whisper = None
 
         output_path = generate_storyboard(
             scenes,
@@ -660,6 +660,14 @@ class VideoWorker:
     def _build_settings(self, job, media_local, clip_durations, cover_local, voice_path, music_path, work_dir, trim_starts=None, clip_focus=None, clip_zoom=None, target_duration=0.0):
         s = job.get("settings") or {}
         timeline_texts, timeline_overlays, timeline_audio = self._resolve_timeline(job, work_dir)
+        from ..services import transcribe as transcribe_service
+
+        transcriber = transcribe_service.make_transcriber(
+            job.get("userId") or "",
+            job.get("workspaceId") or "",
+            self.storage,
+            self.settings,
+        )
         # Output shape: an explicit aspect ratio wins, then explicit pixels,
         # then RenderSettings' own default. Previously nothing was passed and
         # every product rendered 1080x1920 regardless of what the user asked
@@ -697,6 +705,8 @@ class VideoWorker:
             hook_subtext=s.get("hook_subtext", ""),
             hook_duration=bounded_float(s.get("hook_duration", 1.5), 1.5, 0.0, 30.0),
             captions=bool(s.get("captions", True)),
+            transcribe_fn=transcriber,
+            whisper_model_name=self.settings.whisper_model,
             caption_style=s.get("caption_style", "Karaoke"),
             font_size=bounded_int(s.get("font_size", 58), 58, 8, 240),
             words_per_line=bounded_int(s.get("words_per_line", 5), 5, 1, 20),

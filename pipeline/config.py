@@ -259,6 +259,10 @@ class RenderSettings:
 
     # Captions
     captions: bool = True
+    # Optional backend transcriber: (audio_path) -> [{word,start,end}] | None.
+    # When set, captions go through RunPod instead of loading Whisper locally.
+    transcribe_fn: object = None
+    whisper_model_name: str = "base"
     caption_style: str = "Karaoke"
     font_size: int = 58
     words_per_line: int = 5

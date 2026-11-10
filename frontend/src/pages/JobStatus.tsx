@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useJob } from "../hooks/useJobs";
 import { api } from "../services/api";
 import { copyText, useToast } from "../components/feedback";
@@ -203,6 +203,21 @@ function CompletedView({ jobId, title, output }: { jobId: string; title: string;
   const duration = output?.duration ? Math.round(output.duration) : 0;
   const sizeMb = output?.fileSize ? (output.fileSize / (1024 * 1024)).toFixed(1) : "";
   const [src, setSrc] = useState(output?.url as string | undefined);
+
+  // URLs are short-lived signed links (local HMAC or S3 presigned), so refresh
+  // the playable URL instead of trusting the one stored on the job document.
+  useEffect(() => {
+    let alive = true;
+    api
+      .mediaUrl(jobId)
+      .then((r) => {
+        if (alive && r.url) setSrc(r.url);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [jobId]);
   const [name, setName] = useState(title);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);

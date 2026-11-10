@@ -3,8 +3,24 @@
 from __future__ import annotations
 
 import os
+import threading
 
 from .utils import run_cmd
+
+_LOCAL_MODELS = {}
+_LOCAL_LOCK = threading.Lock()
+
+
+def _local_model(name: str):
+    key = name or "base"
+    with _LOCAL_LOCK:
+        model = _LOCAL_MODELS.get(key)
+        if model is None:
+            import whisper  # type: ignore
+
+            model = whisper.load_model(key)
+            _LOCAL_MODELS[key] = model
+        return model
 
 
 def ass_time(seconds):
@@ -79,10 +95,21 @@ def shift_ass_time(time_string, offset):
 
 def create_captions(narration, whisper_model, settings):
     """Generate karaoke ASS captions (optionally synced with hook offset)."""
-    import whisper  # type: ignore  (lazy: heavy import)
-
     cap = settings.caption_values()
-    words = transcribe_words(whisper_model, narration)
+    words = None
+    transcriber = getattr(settings, "transcribe_fn", None)
+    if callable(transcriber):
+        try:
+            words = transcriber(narration)
+        except Exception as exc:  # noqa: BLE001 - local fallback is intentional
+            print(f"[captions] remote transcription failed ({exc}); using local Whisper")
+            words = None
+    if not words:
+        if whisper_model is None:
+            whisper_model = _local_model(
+                getattr(settings, "whisper_model_name", "base") or "base"
+            )
+        words = transcribe_words(whisper_model, narration)
 
     font_name = "DejaVu Sans"
     if settings.font_file:

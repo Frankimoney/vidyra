@@ -52,6 +52,26 @@ def submit_run(api_base: str, api_key: str, endpoint_id: str, input_payload: dic
     return run_id
 
 
+def run_sync(
+    api_base: str,
+    api_key: str,
+    endpoint_id: str,
+    input_payload: dict,
+    timeout: int = 300,
+) -> dict:
+    """Run synchronously and return the completed response.
+
+    Used by short deterministic tools such as Whisper transcription where the
+    caller needs the result inline rather than an artifact callback.
+    """
+    return _request(
+        f"{api_base}/{endpoint_id}/runsync",
+        api_key,
+        {"input": input_payload},
+        timeout=timeout,
+    )
+
+
 def get_run_status(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> dict:
     result = _request(f"{api_base}/{endpoint_id}/runs/{run_id}", api_key)
     if not result:

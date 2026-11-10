@@ -36,8 +36,15 @@ async def get_current_user(
     token = credentials.credentials
     s: Settings = request.app.state.settings
 
-    # Development-only bypass
-    if s.dev_mode and s.dev_api_key and token == s.dev_api_key:
+    # Development-only bypass. Restricted to loopback / the in-process test
+    # client so a LAN or tunnel request can never use the static dev key.
+    host = (getattr(request.client, "host", "") or "").lower()
+    if (
+        s.dev_mode
+        and s.dev_api_key
+        and token == s.dev_api_key
+        and host in ("127.0.0.1", "::1", "localhost", "testclient")
+    ):
         return CurrentUser(uid="dev-user", token=token, dev=True)
 
     if not firebase.ready:

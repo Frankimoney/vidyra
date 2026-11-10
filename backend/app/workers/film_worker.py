@@ -1438,17 +1438,7 @@ class FilmWorker:
             )
 
         whisper = None
-        if getattr(settings, "captions", False):
-            try:
-                whisper = self.video_worker._get_whisper()
-            except Exception:
-                whisper = None
-            if whisper is None:
-                # Whisper unavailable (not downloaded / offline): render without
-                # captions rather than failing the whole film.
-                settings = replace(settings, captions=False)
-        elif getattr(settings, "captions", False) is False:
-            pass
+        whisper = None
 
         output_path = generate_storyboard(
             scenes,

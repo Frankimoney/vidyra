@@ -268,11 +268,13 @@ def generate_video(settings, whisper_model=None, on_progress=None, on_stage=None
     reporter.stage_start("captions")
     caption_file = None
     if settings.captions:
-        if whisper_model is None:
-            import whisper  # type: ignore
-
-            whisper_model = whisper.load_model("base")
-        caption_file = create_captions(narration, whisper_model, settings)
+        # create_captions prefers settings.transcribe_fn (Runpod) and only
+        # loads local Whisper if remote transcription is unavailable.
+        try:
+            caption_file = create_captions(narration, whisper_model, settings)
+        except Exception as exc:  # noqa: BLE001 - captions must not kill a render
+            print(f"[captions] skipped ({exc})")
+            caption_file = None
     reporter.update("captions", 100, "Captions complete")
 
     # ------------------------------------------------------------
