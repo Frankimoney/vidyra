@@ -11,6 +11,8 @@ venv/
 *.pem
 *.key
 backend/.env
+backend/config/studio.env
+studio.env
 config/vidyra-firebase-admin.json
 config/vidyra-firebase-adminsdk-*.json
 backend/config/vidyra-firebase-adminsdk-*.json
