@@ -37,6 +37,8 @@ Thumbs.db
 
 # Firebase cache
 .fronteme/.firebase/
+.firebase/
+**/.firebase/
 
 # Dependency lock files
 frontend/package-lock.json

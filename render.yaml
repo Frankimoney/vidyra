@@ -16,11 +16,12 @@ services:
         value: r2
       - key: SIGNED_URL_SECRET
         generateValue: true
-      # Set these after the first deploy (Render prompts for sync:false).
       - key: PUBLIC_URL
-        sync: false
+        value: https://vidyra-api.onrender.com
+      - key: FRONTEND_URL
+        value: https://vidyra.web.app
       - key: CORS_ORIGINS
-        sync: false
+        value: https://vidyra.web.app,https://vidyra.firebaseapp.com
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CREDENTIALS_JSON

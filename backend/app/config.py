@@ -51,7 +51,11 @@ class Settings:
     )
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     signed_url_secret: str = os.getenv("SIGNED_URL_SECRET", "")
-<<<<<<< HEAD
+    signed_url_ttl_seconds: int = int(os.getenv("SIGNED_URL_TTL_SECONDS", "3600"))
+    share_url_ttl_seconds: int = int(
+        os.getenv("SHARE_URL_TTL_SECONDS", str(7 * 24 * 3600))
+    )
+
     # S3-compatible storage (Runpod network volume, MinIO, AWS S3).
     s3_endpoint_url: str = os.getenv("S3_ENDPOINT_URL", "")
     s3_region: str = os.getenv("S3_REGION", "")
@@ -59,12 +63,6 @@ class Settings:
     s3_access_key: str = os.getenv("S3_ACCESS_KEY", "")
     s3_secret_key: str = os.getenv("S3_SECRET_KEY", "")
     s3_clock_offset_seconds: float = float(os.getenv("S3_CLOCK_OFFSET_SECONDS", "0") or 0)
-=======
-    signed_url_ttl_seconds: int = int(os.getenv("SIGNED_URL_TTL_SECONDS", "3600"))
-    share_url_ttl_seconds: int = int(
-        os.getenv("SHARE_URL_TTL_SECONDS", str(7 * 24 * 3600))
-    )
->>>>>>> 6994d3f887877433e80f105f97671716065a31ae
     work_root: str = os.getenv("WORK_ROOT", "storage/work")
     output_public_dir: str = os.getenv("OUTPUT_PUBLIC_DIR", "storage/public")
 
