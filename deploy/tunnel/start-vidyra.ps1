@@ -11,8 +11,9 @@ function Start-Backend {
     $env:CORS_ORIGINS = "http://localhost:5173,http://localhost:4173,https://vidyra.web.app"
     $env:FIREBASE_PROJECT_ID = "vidyra"
     $env:SERVICE_ACCOUNT_PATH = Join-Path $root "backend\config\vidyra-firebase-adminsdk-fbsvc-31c93a2e64.json"
-    $env:STORAGE_BACKEND = "local"
-    $env:STORAGE_ROOT = "storage\data"
+    # R2_ACCOUNT_ID / R2_BUCKET / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY are required.
+    $env:STORAGE_BACKEND = "r2"
+    $env:STORAGE_ROOT = "storage\cache"
     $env:WORK_ROOT = "storage\work"
     # Solo RunPod: override with $env:PUBLIC_URL_OVERRIDE before launching so the
     # GPU worker can call back (e.g. your stable trycloudflare / named tunnel URL).
@@ -22,6 +23,7 @@ function Start-Backend {
     $env:FRONTEND_URL = "http://localhost:5173"
     $env:VIDYRA_VOICE_DIR = Join-Path $root "models\piper"
     $env:PATH = (Join-Path $root ".venv\Scripts") + ";" + (Join-Path $root "vidyra-tools\ffmpeg-9.0.1-essentials_build\bin") + ";" + $env:PATH
+<<<<<<< HEAD
     $storageEnv = Join-Path $root "backend\config\storage.env"
     if (Test-Path $storageEnv) {
         Get-Content $storageEnv | ForEach-Object {
@@ -33,6 +35,9 @@ function Start-Backend {
         }
     }
     Start-Process -FilePath $py -ArgumentList "-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8000" -WorkingDirectory $root -RedirectStandardError $backlog -WindowStyle Hidden
+=======
+    Start-Process -FilePath $py -ArgumentList "-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "127.0.0.1", "--port", "8000" -WorkingDirectory $root -RedirectStandardError $backlog -WindowStyle Hidden
+>>>>>>> 6994d3f887877433e80f105f97671716065a31ae
 }
 
 $up = $false

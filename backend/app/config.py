@@ -17,6 +17,9 @@ class Settings:
     bucket: str = os.getenv("FIREBASE_BUCKET", "")
     service_account_path: str = os.getenv("SERVICE_ACCOUNT_PATH", "")
     google_app_credentials: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    # Full service-account JSON in an env var (Render/RunPod secrets), used
+    # before the file-path options above.
+    firebase_credentials_json: str = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
 
     # App / security
     app_env: str = os.getenv("APP_ENV", "development")
@@ -32,18 +35,23 @@ class Settings:
     )
     dev_api_key: str = os.getenv("DEV_API_KEY", "")
     rate_limit_per_min: int = int(os.getenv("API_RATE_LIMIT_PER_MIN", "60"))
+    # In-process cleanup/series timers. Render's free instance sleeps, so the
+    # deployed API disables them and a cron job runs app.cron instead.
+    background_loops: bool = _bool(os.getenv("BACKGROUND_LOOPS"), True)
 
     # Storage / jobs
-    # Media + finished videos live on the server disk ("local", the default)
-    # because Firebase Storage requires the paid Blaze plan since Feb 2026.
-    # Set STORAGE_BACKEND=firebase only if you upgrade to Blaze.
-    storage_backend: str = os.getenv("STORAGE_BACKEND", "local")
-    storage_root: str = os.getenv("STORAGE_ROOT", "storage/data")
-    public_url: str = os.getenv(
-        "PUBLIC_URL", "http://localhost:8000"
+    # All media, artifacts, and renders persist in Cloudflare R2. The local
+    # disk is only used for ephemeral work files while a request is running.
+    storage_backend: str = os.getenv("STORAGE_BACKEND", "r2")
+    storage_root: str = os.getenv("STORAGE_ROOT", "storage/cache")
+    public_url: str = (
+        os.getenv("PUBLIC_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or "http://localhost:8000"
     )
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     signed_url_secret: str = os.getenv("SIGNED_URL_SECRET", "")
+<<<<<<< HEAD
     # S3-compatible storage (Runpod network volume, MinIO, AWS S3).
     s3_endpoint_url: str = os.getenv("S3_ENDPOINT_URL", "")
     s3_region: str = os.getenv("S3_REGION", "")
@@ -51,8 +59,23 @@ class Settings:
     s3_access_key: str = os.getenv("S3_ACCESS_KEY", "")
     s3_secret_key: str = os.getenv("S3_SECRET_KEY", "")
     s3_clock_offset_seconds: float = float(os.getenv("S3_CLOCK_OFFSET_SECONDS", "0") or 0)
+=======
+    signed_url_ttl_seconds: int = int(os.getenv("SIGNED_URL_TTL_SECONDS", "3600"))
+    share_url_ttl_seconds: int = int(
+        os.getenv("SHARE_URL_TTL_SECONDS", str(7 * 24 * 3600))
+    )
+>>>>>>> 6994d3f887877433e80f105f97671716065a31ae
     work_root: str = os.getenv("WORK_ROOT", "storage/work")
     output_public_dir: str = os.getenv("OUTPUT_PUBLIC_DIR", "storage/public")
+
+    # Cloudflare R2 (S3-compatible). R2_ENDPOINT may be omitted when
+    # R2_ACCOUNT_ID is set.
+    r2_account_id: str = os.getenv("R2_ACCOUNT_ID", "")
+    r2_endpoint: str = os.getenv("R2_ENDPOINT", "")
+    r2_bucket: str = os.getenv("R2_BUCKET", "")
+    r2_access_key_id: str = os.getenv("R2_ACCESS_KEY_ID", "")
+    r2_secret_access_key: str = os.getenv("R2_SECRET_ACCESS_KEY", "")
+    r2_public_base_url: str = os.getenv("R2_PUBLIC_BASE_URL", "")
     max_media_count: int = int(os.getenv("MAX_MEDIA_COUNT", "60"))
     max_media_bytes: int = int(os.getenv("MAX_MEDIA_BYTES", str(50 * 1024 * 1024)))
     max_script_chars: int = int(os.getenv("MAX_SCRIPT_CHARS", "6000"))
@@ -74,6 +97,7 @@ class Settings:
     # RunPod serverless GPU (AI Studio)
     runpod_api_key: str = os.getenv("RUNPOD_API_KEY", "")
     runpod_endpoint_id: str = os.getenv("RUNPOD_ENDPOINT_ID", "")
+    runpod_pipeline_endpoint_id: str = os.getenv("RUNPOD_PIPELINE_ENDPOINT_ID", "")
     runpod_api_base: str = os.getenv("RUNPOD_API_BASE", "https://api.runpod.ai/v2")
     runpod_fake: bool = _bool(os.getenv("RUNPOD_FAKE"), False)
     runpod_poll_seconds: int = int(os.getenv("RUNPOD_POLL_SECONDS", "6"))
@@ -119,6 +143,10 @@ class Settings:
         return bool(self.runpod_api_key and self.runpod_endpoint_id)
 
     @property
+    def remote_pipeline(self) -> bool:
+        return bool(self.runpod_api_key and self.runpod_pipeline_endpoint_id)
+
+    @property
     def studio_enabled(self) -> bool:
         return self.runpod_fake or self.runpod_enabled
 
@@ -157,9 +185,8 @@ class Settings:
 
     def ensure_dirs(self):
         os.makedirs(self.work_root, exist_ok=True)
+        os.makedirs(self.storage_root, exist_ok=True)
         os.makedirs(self.output_public_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.storage_root, "media"), exist_ok=True)
-        os.makedirs(os.path.join(self.storage_root, "videos"), exist_ok=True)
 
 
 settings = Settings()

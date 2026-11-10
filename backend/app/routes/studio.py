@@ -25,7 +25,7 @@ from ..services import ratelimit
 from ..services import studio as studio_service
 from ..services import usage as usage_service
 from ..services.ratelimit import rate_limiter
-from ..services.storage.local import _safe_resolve, as_absolute
+from ..services.storage.base import as_absolute
 from ..workers.studio_worker import StudioWorker, _artifact_token
 
 router = APIRouter()
@@ -635,7 +635,7 @@ def _normalize_refs(raw, tool: str, model: str, uid: str, storage) -> list:
         ):
             raise HTTPException(status_code=403, detail=f"Media does not belong to you: {path}")
         try:
-            storage.resolve(path)
+            storage.exists(path)
         except Exception:
             raise HTTPException(status_code=400, detail=f"Media not found: {path}")
         refs.append({"path": path, "role": role})

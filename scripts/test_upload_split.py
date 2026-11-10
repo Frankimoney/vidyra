@@ -32,8 +32,25 @@ from app.routes.uploads import (  # noqa: E402
     _segments_sane,
     _split_video,
 )
-from app.services.storage.local import LocalStorageDriver  # noqa: E402
 from pipeline.utils import get_duration  # noqa: E402
+
+
+class MemoryStorage:
+    """Test double for R2: keeps published bytes in memory, never on disk."""
+
+    def __init__(self, root="", secret=""):
+        self.root = root
+        self.secret = secret
+        self.blobs = {}
+
+    def publish(self, local, rel):
+        with open(local, "rb") as fh:
+            self.blobs[rel] = fh.read()
+        return f"/media/{rel}"
+
+    def delete_file(self, rel):
+        return self.blobs.pop(rel, None) is not None
+
 
 FAILURES = []
 WORK = tempfile.mkdtemp(prefix="vidyra-split-")
@@ -64,7 +81,7 @@ def make_clip(name, seconds, gop, size="1280x720"):
 
 def split(path, name="clip.mov", root=None):
     root = root or os.path.join(WORK, "storage")
-    driver = LocalStorageDriver(root, "testsecret")
+    driver = MemoryStorage(root, "testsecret")
     return _split_video(driver, "dev-user", os.urandom(4).hex(), name, path), driver, root
 
 
@@ -74,7 +91,7 @@ def test_fast_path():
     src = make_clip("normal.mp4", 60, 30)          # keyframe every 1s
     driver_root = os.path.join(WORK, "fast")
     os.makedirs(driver_root, exist_ok=True)
-    driver = LocalStorageDriver(driver_root, "testsecret")
+    driver = MemoryStorage(driver_root, "testsecret")
 
     t0 = time.time()
     items = _split_video(driver, "dev-user", "vid1", "clip.mov", src)
@@ -105,7 +122,7 @@ def test_single_segment_keeps_name():
     src = make_clip("tiny.mp4", 2, 30)
     root = os.path.join(WORK, "single")
     os.makedirs(root, exist_ok=True)
-    driver = LocalStorageDriver(root, "testsecret")
+    driver = MemoryStorage(root, "testsecret")
     items = _split_video(driver, "dev-user", "vid2", "My Highlight.mov", src)
     check("returns exactly one segment", len(items) == 1, f"{len(items)}")
     check("keeps the uploaded filename", items[0]["name"] == "My Highlight.mov",
@@ -127,7 +144,7 @@ def test_sparse_keyframes():
     src = make_clip("sparse.mp4", 40, 300)         # keyframe every 10s
     root = os.path.join(WORK, "sparse")
     os.makedirs(root, exist_ok=True)
-    driver = LocalStorageDriver(root, "testsecret")
+    driver = MemoryStorage(root, "testsecret")
     items = _split_video(driver, "dev-user", "vid3", "clip.mov", src)
 
     source = get_duration(src)
@@ -175,7 +192,7 @@ def test_too_long_rejected():
 
     root = os.path.join(WORK, "cap")
     os.makedirs(root, exist_ok=True)
-    driver = LocalStorageDriver(root, "testsecret")
+    driver = MemoryStorage(root, "testsecret")
     src = make_clip("long.mp4", 5, 30)
 
     import app.routes.uploads as up

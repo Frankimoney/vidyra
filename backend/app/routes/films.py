@@ -45,7 +45,8 @@ from ..services import usage as usage_service
 from ..services import voice_refs
 from ..services import workspaces as workspace_service
 from ..services.ratelimit import rate_limiter
-from ..workers.film_worker import FilmWorker, clone_voice_runs, film_runs_needed
+from ..workers.film_worker import clone_voice_runs, film_runs_needed
+from ..workers.remote_worker import PipelineWorker
 
 router = APIRouter()
 
@@ -247,7 +248,7 @@ async def create_film(
         timeline=timeline or None,
     )
 
-    worker: FilmWorker = request.app.state.film_worker
+    worker: PipelineWorker = request.app.state.film_worker
     await worker.submit(job_id)
 
     return CreateOut(job_id=job_id)

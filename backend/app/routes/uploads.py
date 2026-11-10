@@ -34,8 +34,7 @@ from pipeline.utils import (
 from ..auth import CurrentUser, get_current_user
 from ..config import Settings
 from ..services import ratelimit
-from ..services.storage.local import (
-    LocalStorageDriver,
+from ..services.storage.base import (
     _safe_resolve,
     as_absolute,
     verify_signed_url,
@@ -289,17 +288,12 @@ def _split_video(storage, uid: str, upload_id: str, filename: str, source: str) 
         )
 
     rel_dir = f"media/{uid}/{upload_id}"
-    try:
-        dest_dir = _safe_resolve(storage.root, rel_dir)
-        os.makedirs(dest_dir, exist_ok=True)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid storage location.")
-
+    work_root = tempfile.mkdtemp(prefix="vidyra-split-")
+    dest_dir = os.path.join(work_root, "segments")
+    work = os.path.join(work_root, "work")
     ext = _segment_ext(source)
-    # A temp sibling for the re-encoded intermediate, so it lands on the same
-    # volume as the segments and never leaks outside the storage root.
-    work = _safe_resolve(storage.root, f"{rel_dir}/.work")
     try:
+        os.makedirs(dest_dir, exist_ok=True)
         try:
             _cut_video_copy(source, dest_dir, ext)
             segments = _list_segments(dest_dir, ext)
@@ -323,25 +317,30 @@ def _split_video(storage, uid: str, upload_id: str, filename: str, source: str) 
                 raise HTTPException(
                     status_code=400, detail=f"Could not split the video: {str(exc)[:200]}"
                 )
+
+        if not _segments_sane(segments, duration):
+            raise HTTPException(
+                status_code=400,
+                detail="Could not cut this video into usable clips. Try exporting it as H.264 MP4.",
+            )
+
+        items = []
+        for path, seconds in segments:
+            name = os.path.basename(path)
+            rel = f"{rel_dir}/{name}"
+            size = os.path.getsize(path)
+            storage.publish(path, rel)
+            items.append(
+                {
+                    "storagePath": rel,
+                    "name": name,
+                    "size": size,
+                    "type": "video",
+                    "duration": round(seconds, 3),
+                }
+            )
     finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-    if not _segments_sane(segments, duration):
-        raise HTTPException(
-            status_code=400,
-            detail="Could not cut this video into usable clips. Try exporting it as H.264 MP4.",
-        )
-
-    items = [
-        {
-            "storagePath": f"{rel_dir}/{os.path.basename(path)}",
-            "name": os.path.basename(path),
-            "size": os.path.getsize(path),
-            "type": "video",
-            "duration": round(seconds, 3),
-        }
-        for path, seconds in segments
-    ]
+        shutil.rmtree(work_root, ignore_errors=True)
 
     if len(items) == 1:
         items[0]["name"] = filename
@@ -548,7 +547,7 @@ async def serve_media(
     storage = request.app.state.storage
     if storage.kind != "local":
         raise HTTPException(status_code=404, detail="Not found.")
-    driver: LocalStorageDriver = storage
+    driver = storage
 
     if not verify_signed_url(storage_path, exp, sig, driver.secret):
         raise HTTPException(status_code=403, detail="Invalid or expired media link.")

@@ -23,8 +23,8 @@ dist/
 build/
 
 # Runtime data (job temp work, local copies)
-storage/
-models/
+/storage/
+/models/
 
 # OS / editor
 .DS_Store

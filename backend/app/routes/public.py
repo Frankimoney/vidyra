@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from ..services import jobs as jobs_service
 from ..services.shares import parse_share_token
-from ..services.storage.local import as_absolute
+from ..services.storage.base import as_absolute
 
 router = APIRouter()
 

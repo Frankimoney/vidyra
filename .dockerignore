@@ -1,0 +1,12 @@
+.git
+.github
+frontend/node_modules
+frontend/dist
+storage
+models
+**/__pycache__
+**/*.pyc
+.env
+backend/.env
+.gradio
+*.log

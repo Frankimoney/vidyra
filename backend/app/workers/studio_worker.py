@@ -27,7 +27,7 @@ from ..config import Settings
 from ..services import runpod as runpod_client
 from ..services import studio as studio_service
 from ..services import usage as usage_service
-from ..services.storage.local import as_absolute, signed_media_path
+from ..services.storage.base import as_absolute
 
 # Tools whose GPU work is many sequential passes rather than one sample, and
 # so need a proportionally longer wall-clock budget on RunPod.
@@ -206,7 +206,7 @@ class StudioWorker:
                 continue
             try:
                 url = as_absolute(
-                    signed_media_path(storage_path, 7 * 24 * 3600, self.settings.sign_secret),
+                    self.storage.media_url(storage_path, 7 * 24 * 3600),
                     self.settings.public_url,
                 )
             except Exception:

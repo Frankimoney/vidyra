@@ -19,7 +19,7 @@ for path in (str(ROOT), str(ROOT / "backend")):
         sys.path.insert(0, path)
 
 from app.services import shares  # noqa: E402
-from app.services.storage.local import (  # noqa: E402
+from app.services.storage.base import (  # noqa: E402
     StorageError,
     _safe_resolve,
     signed_media_path,
