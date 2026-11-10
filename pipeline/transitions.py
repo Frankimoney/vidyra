@@ -21,7 +21,7 @@ XFADE_BATCH_SIZE = 8
 AUTO_TRANSITIONS = ["fade", "slideleft", "slideright", "wipeleft", "wiperight"]
 
 
-def _resolve_clip_durations(n, narration_duration, clip_durations):
+def _resolve_clip_durations(n, narration_duration, clip_durations, transition_duration=TRANSITION_DURATION):
     """Return per-clip seconds that fill narration time.
 
     Explicit durations are kept; unspecified clips absorb the remaining
@@ -34,10 +34,10 @@ def _resolve_clip_durations(n, narration_duration, clip_durations):
     explicit = explicit[:n] + [None] * (n - len(explicit))
 
     if not any(explicit):
-        duration = (narration_duration + (n - 1) * TRANSITION_DURATION) / n
+        duration = (narration_duration + (n - 1) * transition_duration) / n
         return [duration] * n
 
-    target = narration_duration + (n - 1) * TRANSITION_DURATION
+    target = narration_duration + (n - 1) * transition_duration
     known = sum(d for d in explicit if d is not None)
     unknown = [i for i, d in enumerate(explicit) if d is None]
 
@@ -120,18 +120,19 @@ def _encode_xfade_batch(paths, actual_durations, styles, settings, output):
         )
 
     prev = "b0"
+    transition_duration = max(0.1, min(2.0, float(getattr(settings, "transition_duration", TRANSITION_DURATION) or TRANSITION_DURATION)))
     accum = actual_durations[0]
     for i in range(1, len(paths)):
-        offset = max(0.0, accum - TRANSITION_DURATION)
+        offset = max(0.0, accum - transition_duration)
         label = f"x{i}"
         parts.append(
             f"[{prev}][b{i}]xfade="
             f"transition={styles[i - 1]}:"
-            f"duration={TRANSITION_DURATION}:"
+            f"duration={transition_duration:.3f}:"
             f"offset={offset:.4f}[{label}]"
         )
         prev = label
-        accum = accum + actual_durations[i] - TRANSITION_DURATION
+        accum = accum + actual_durations[i] - transition_duration
 
     command += [
         "-filter_complex", ";".join(parts),
@@ -160,13 +161,14 @@ def _chain_incremental(rendered, settings):
         output = os.path.join(settings.temp_dir, f"transition_{index:03d}.mp4")
 
         current_duration = get_duration(current)
-        offset = max(0, current_duration - TRANSITION_DURATION)
+        transition_duration = max(0.1, min(2.0, float(getattr(settings, "transition_duration", TRANSITION_DURATION) or TRANSITION_DURATION)))
+        offset = max(0, current_duration - transition_duration)
         transition_name = _transition_name(settings.transition, index)
 
         filter_complex = (
             f"[0:v][1:v]xfade="
             f"transition={transition_name}:"
-            f"duration={TRANSITION_DURATION}:"
+            f"duration={transition_duration:.3f}:"
             f"offset={offset},format=yuv420p[v]"
         )
 
@@ -246,6 +248,11 @@ def create_clip_sequence(
     trim_starts=None,
     focuses=None,
     zooms=None,
+    speeds=None,
+    reverses=None,
+    freezes=None,
+    motions=None,
+    keyframes=None,
 ):
     """Render images (animated zoom) and/or video clips into one xfade sequence.
 
@@ -257,7 +264,8 @@ def create_clip_sequence(
     joined with xfade transitions.
     """
     n = len(clips)
-    durations = _resolve_clip_durations(n, narration_duration, clip_durations)
+    transition_duration = max(0.1, min(2.0, float(getattr(settings, "transition_duration", TRANSITION_DURATION) or TRANSITION_DURATION)))
+    durations = _resolve_clip_durations(n, narration_duration, clip_durations, transition_duration)
     kinds = kinds or ["image"] * n
     if len(kinds) < n:
         kinds = kinds + ["image"] * (n - len(kinds))
@@ -265,14 +273,25 @@ def create_clip_sequence(
     foci = list(focuses or [])[:n] + [(0.5, 0.5)] * max(0, n - len(focuses or []))
     zooms = [float(z or 1.0) for z in (list(zooms or [])[:n])]
     zooms += [1.0] * max(0, n - len(zooms))
+    speeds = [float(v or 1.0) for v in (list(speeds or [])[:n])]
+    speeds += [1.0] * max(0, n - len(speeds))
+    reverses = [bool(v) for v in (list(reverses or [])[:n])]
+    reverses += [False] * max(0, n - len(reverses))
+    freezes = [bool(v) for v in (list(freezes or [])[:n])]
+    freezes += [False] * max(0, n - len(freezes))
+    motions = [str(v or "auto") for v in (list(motions or [])[:n])]
+    motions += ["auto"] * max(0, n - len(motions))
+    kfs = list(keyframes or [])[:n]
+    kfs += [None] * max(0, n - len(kfs))
 
     if n == 1:
-        if kinds[0] == "video":
+        if kinds[0] == "video" and not freezes[0]:
             return process_video_clip(
-                clips[0], durations[0], settings, 0, trims[0], foci[0], zooms[0]
+                clips[0], durations[0], settings, 0, trims[0], foci[0], zooms[0],
+                speeds[0], reverses[0], freezes[0], motions[0], kfs[0],
             )
         return create_animated_image(
-            clips[0], durations[0], 0, settings, foci[0], zooms[0]
+            clips[0], durations[0], 0, settings, foci[0], zooms[0], motions[0], kfs[0]
         )
 
     # The chain is the most expensive stage in the whole pipeline, so the cache
@@ -285,7 +304,8 @@ def create_clip_sequence(
         clip_keys = [
             clip_key(
                 kind if kind else "image", clip, durations[idx], idx, settings,
-                trims[idx], foci[idx], zooms[idx],
+                trims[idx], foci[idx], zooms[idx], speeds[idx],
+                reverses[idx], motions[idx], kfs[idx],
             )
             for idx, (clip, kind) in enumerate(zip(clips, kinds))
         ]
@@ -296,18 +316,27 @@ def create_clip_sequence(
 
     rendered = []
     for index, (clip, kind) in enumerate(zip(clips, kinds)):
-        if kind == "video":
+        if kind == "video" and not freezes[index]:
             rendered.append(
                 process_video_clip(
                     clip, durations[index], settings, index,
                     trims[index], foci[index], zooms[index],
+                    speeds[index], reverses[index], freezes[index], motions[index], kfs[index],
+                )
+            )
+        elif kind == "video":
+            rendered.append(
+                process_video_clip(
+                    clip, durations[index], settings, index,
+                    trims[index], foci[index], zooms[index],
+                    speeds[index], reverses[index], True, motions[index], kfs[index],
                 )
             )
         else:
             rendered.append(
                 create_animated_image(
                     clip, durations[index], index, settings,
-                    foci[index], zooms[index],
+                    foci[index], zooms[index], motions[index], kfs[index],
                 )
             )
 

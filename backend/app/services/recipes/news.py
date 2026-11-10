@@ -87,7 +87,7 @@ def draft(payload: dict, defaults: dict, aspect: str) -> dict:
         f"Article:\n{article['text'][:12000]}"
     )
     data, sources, provider = base.call_json(
-        _SYSTEM.replace("__N__", str(count)),
+        _SYSTEM,
         user,
         use_search=bool(settings.gemini_configured),
     )

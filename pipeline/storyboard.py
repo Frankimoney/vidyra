@@ -177,6 +177,11 @@ def generate_storyboard(
             trim_starts=list(scene.get("trim_starts") or []),
             clip_focus=list(scene.get("clip_focus") or []),
             clip_zoom=list(scene.get("clip_zoom") or []),
+            clip_speeds=list(scene.get("clip_speeds") or []),
+            clip_reverse=list(scene.get("clip_reverse") or []),
+            clip_freeze=list(scene.get("clip_freeze") or []),
+            clip_motions=list(scene.get("clip_motions") or []),
+            clip_keyframes=list(scene.get("clip_keyframes") or []),
             target_duration=float(scene.get("duration") or 0.0),
             transition=scene.get("transition") or settings.transition,
             hook=False,
@@ -217,6 +222,19 @@ def generate_storyboard(
                 f"{settings.music_path}"
             )
         shutil.copy2(combined, final)
+
+    # Creator-added timeline tracks (text, PiP/logo overlays, extra audio) are
+    # applied once on the finished cut, after narration/captions/music.
+    if (
+        getattr(settings, "timeline_texts", None)
+        or getattr(settings, "timeline_overlays", None)
+        or getattr(settings, "timeline_audio", None)
+    ):
+        from .finish import apply_timeline
+
+        finished = os.path.join(base_temp, "timeline_final.mp4")
+        apply_timeline(final, finished, settings)
+        os.replace(finished, final)
 
     if on_progress:
         on_progress("finalizing", 100, "Storyboard ready")

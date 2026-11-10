@@ -50,6 +50,7 @@ def create_job(
     scenes: list | None = None,
     characters: list | None = None,
     workspace_id: str = "",
+    timeline: dict | None = None,
 ) -> str:
     job_id = uuid.uuid4().hex[:16]
     now = _now_stamp()
@@ -63,6 +64,7 @@ def create_job(
         "settings": settings,
         "niche": niche,
         "workspaceId": workspace_id,
+        "timeline": timeline or {},
         "status": "queued",
         "stage": "queued",
         "progress": 0,
@@ -77,6 +79,8 @@ def create_job(
         doc["type"] = "storyboard"
     if characters:
         doc["characters"] = characters
+    if timeline:
+        doc["timeline"] = timeline
     if _using_dev_store():
         _memory_store[job_id] = doc
     else:
@@ -135,6 +139,7 @@ def create_film_job(
     settings: dict,
     niche: str = "",
     workspace_id: str = "",
+    timeline: dict | None = None,
 ) -> str:
     """Create an auto-generated film job. `film` holds the user's idea + options;
     the worker expands it into scenes and renders them."""
@@ -152,6 +157,7 @@ def create_film_job(
         "settings": settings,
         "niche": niche,
         "workspaceId": workspace_id,
+        "timeline": timeline or {},
         "status": "queued",
         "stage": "queued",
         "progress": 0,

@@ -90,6 +90,9 @@ def clip_key(
     trim_start: float = 0,
     focus=(0.5, 0.5),
     zoom: float = 1.0,
+    speed: float = 1.0,
+    reverse: bool = False,
+    motion: str = "auto",
 ) -> str:
     try:
         fx, fy = focus
@@ -105,6 +108,9 @@ def clip_key(
         round(float(fx or 0.5), 4),
         round(float(fy or 0.5), 4),
         round(float(zoom or 1.0), 4),
+        round(float(speed or 1.0), 4),
+        bool(reverse),
+        str(motion or "auto"),
         getattr(settings, "reframe", "auto"),
         settings.width,
         settings.height,

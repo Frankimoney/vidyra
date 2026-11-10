@@ -90,6 +90,13 @@ def render_final(
     command = ["ffmpeg", "-y", "-i", final_visual, "-i", final_audio]
 
     vf_parts = []
+    brightness = float(getattr(settings, "color_brightness", 0.0) or 0.0)
+    contrast = float(getattr(settings, "color_contrast", 1.0) or 1.0)
+    saturation = float(getattr(settings, "color_saturation", 1.0) or 1.0)
+    if abs(brightness) > 0.001 or abs(contrast - 1.0) > 0.001 or abs(saturation - 1.0) > 0.001:
+        vf_parts.append(
+            f"eq=brightness={brightness:.3f}:contrast={contrast:.3f}:saturation={saturation:.3f}"
+        )
     if caption_file:
         caption_path = (
             caption_file.replace("\\", "/").replace(":", "\\:")
@@ -104,6 +111,8 @@ def render_final(
         command.extend(["-vf", ",".join(vf_parts)])
 
     preset = "ultrafast" if getattr(settings, "preview", False) else "veryfast"
+    if getattr(settings, "normalize_audio", False):
+        command.extend(["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"])
     command.extend(
         [
             "-map", "0:v",

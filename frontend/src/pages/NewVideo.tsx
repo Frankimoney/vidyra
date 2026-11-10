@@ -18,7 +18,16 @@ const ICONS: Record<string, string> = {
   news: "📰",
   player_story: "🏀",
   game_recap: "📊",
+  custom: "✨",
 };
+
+function sourceLabel(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
 
 function initialValues(fields: RecipeField[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -198,11 +207,11 @@ export default function NewVideo() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link to="/create" className="btn btn-ghost">
+          <Link to="/editor" className="btn btn-ghost">
             Blank timeline
           </Link>
           <Link to="/film?mode=film" className="btn btn-ghost">
-            Cinematic film
+            Advanced film
           </Link>
           <Link to="/workspace" className="btn btn-ghost">
             Workspace
@@ -217,7 +226,7 @@ export default function NewVideo() {
               <Card
                 key={r.id}
                 onClick={() => choose(r)}
-                className={activeId === r.id ? "card-click" : "card-click"}
+                className="card-click"
                 style={{
                   cursor: "pointer",
                   borderColor: activeId === r.id ? "var(--accent)" : undefined,
@@ -357,7 +366,7 @@ export default function NewVideo() {
                       className="badge"
                       style={{ textDecoration: "none" }}
                     >
-                      {s.title || new URL(s.url).hostname}
+                      {s.title || sourceLabel(s.url)}
                     </a>
                   ))}
                 </div>

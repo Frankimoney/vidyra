@@ -13,6 +13,7 @@ venv/
 backend/.env
 config/vidyra-firebase-admin.json
 config/vidyra-firebase-adminsdk-*.json
+backend/config/vidyra-firebase-adminsdk-*.json
 
 # Build output
 frontend/dist/

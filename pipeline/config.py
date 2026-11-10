@@ -215,6 +215,11 @@ class RenderSettings:
     # multiplier >= 1. Parallel to media_files; empty entries mean center/1x.
     clip_focus: list = field(default_factory=list)
     clip_zoom: list = field(default_factory=list)
+    clip_speeds: list = field(default_factory=list)
+    clip_reverse: list = field(default_factory=list)
+    clip_freeze: list = field(default_factory=list)
+    clip_motions: list = field(default_factory=list)
+    clip_keyframes: list = field(default_factory=list)
     # Explicit scene length (seconds). 0 => narration decides the length
     # (historical behavior). >0 makes the timeline authoritative: narration is
     # padded/trimmed to fit before the visuals are laid out.
@@ -266,11 +271,26 @@ class RenderSettings:
 
     # Visuals
     transition: str = "Auto"
+    transition_duration: float = TRANSITION_DURATION
     reframe: str = "auto"  # "auto" | "crop" (full-bleed) | "blur" (fit + blurred bg)
+    # Global colour grade (0 / 1 / 1 = untouched).
+    color_brightness: float = 0.0
+    color_contrast: float = 1.0
+    color_saturation: float = 1.0
+    # One-pass loudness normalisation on the final mix.
+    normalize_audio: bool = False
 
     # Page-name corner badge (@handle in the top-right)
     show_page_name: bool = True
     page_name: str = ""
+
+    # Timeline finishing tracks (applied once on the final cut).
+    # texts:    {text, start, end, x, y, size, color, background}
+    # overlays: {path, kind, start, end, x, y, width, opacity} (path is local)
+    # audio:    {path, start, end, volume, fadeIn, fadeOut} (path is local)
+    timeline_texts: list = field(default_factory=list)
+    timeline_overlays: list = field(default_factory=list)
+    timeline_audio: list = field(default_factory=list)
 
     # Output / pipeline environment
     #

@@ -29,13 +29,19 @@ const items: NavItem[] = [
     ),
   },
   {
-    to: "/create",
-    label: "Create",
+    to: "/new",
+    label: "New",
     icon: (
       <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 8v8" />
-        <path d="M8 12h8" />
+        <path d="M12 3v3" />
+        <path d="M12 18v3" />
+        <path d="M3 12h3" />
+        <path d="M18 12h3" />
+        <path d="m5.6 5.6 2.1 2.1" />
+        <path d="m16.3 16.3 2.1 2.1" />
+        <path d="m18.4 5.6-2.1 2.1" />
+        <path d="m7.7 16.3-2.1 2.1" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     ),
   },
@@ -98,6 +104,31 @@ const items: NavItem[] = [
     ),
   },
   {
+    to: "/series",
+    label: "Series",
+    more: true,
+    icon: (
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 2l4 4-4 4" />
+        <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+        <path d="M7 22l-4-4 4-4" />
+        <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+      </svg>
+    ),
+  },
+  {
+    to: "/workspace",
+    label: "Workspace",
+    more: true,
+    icon: (
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 21V7l8-4 8 4v14" />
+        <path d="M9 21v-6h6v6" />
+        <path d="M4 11h16" />
+      </svg>
+    ),
+  },
+  {
     to: "/videos",
     label: "My Videos",
     more: true,
@@ -110,7 +141,7 @@ const items: NavItem[] = [
   },
   {
     to: "/profile",
-    label: "Profile",
+    label: "Account",
     icon: (
       <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="9" r="3.5" />

@@ -73,7 +73,11 @@ check(
 
 section("Recipe catalog")
 ids = [m["id"] for m in recipes.catalog()]
-check("three recipes ship", ids == ["news", "player_story", "game_recap"], str(ids))
+check(
+    "recipes ship",
+    ids == ["news", "player_story", "game_recap", "custom"],
+    str(ids),
+)
 for meta in recipes.catalog():
     check(f"{meta['id']} has fields", bool(meta.get("fields")))
 
@@ -104,6 +108,12 @@ try:
     check("non-http link rejected", False)
 except RecipeError as exc:
     check("non-http link rejected", "http" in str(exc))
+
+try:
+    recipes.get("news").draft({"url": "http://127.0.0.1/secret"}, DEFAULTS, "9:16")
+    check("private address rejected", False)
+except RecipeError as exc:
+    check("private address rejected", "private" in str(exc).lower(), str(exc))
 
 
 section("Player Story recipe (offline)")

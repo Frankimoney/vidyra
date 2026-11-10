@@ -23,6 +23,7 @@ from ..models import StudioRunCreate
 from ..services import imagebrief
 from ..services import ratelimit
 from ..services import studio as studio_service
+from ..services import usage as usage_service
 from ..services.ratelimit import rate_limiter
 from ..services.storage.local import _safe_resolve, as_absolute
 from ..workers.studio_worker import StudioWorker, _artifact_token
@@ -267,6 +268,9 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
             "fit": list(STUDIO_FIT_VALUES),
             "fitLabels": dict(STUDIO_FIT_LABELS),
         },
+        # Conservative per-run USD estimates, shown before the user spends.
+        "prices": dict(usage_service.PRICE_PER_RUN),
+        "defaultPrice": usage_service.DEFAULT_PRICE,
     }
 
 

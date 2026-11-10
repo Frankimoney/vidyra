@@ -28,7 +28,6 @@ from ..models import (
     CharacterOut,
     CreateOut,
     FilmCreate,
-    PodcastCreate,
     ProjectCreate,
     ProjectMessageIn,
     ProjectPlanIn,
@@ -226,6 +225,18 @@ async def create_film(
     if music.startswith("media/") and not music.startswith(f"media/{user.uid}/"):
         raise HTTPException(status_code=400, detail="Music track does not belong to you.")
 
+    timeline = payload.timeline if isinstance(payload.timeline, dict) else {}
+    prefixes = tuple(f"{p}{user.uid}/" for p in ("media/", "studio/", "videos/"))
+    for key in ("overlays", "audio"):
+        for item in timeline.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            path = (item.get("path") or "").replace("\\", "/")
+            if path and not path.startswith(prefixes):
+                raise HTTPException(
+                    status_code=400, detail="Timeline media does not belong to you."
+                )
+
     job_id = jobs_service.create_film_job(
         uid=user.uid,
         title=title,
@@ -233,6 +244,7 @@ async def create_film(
         settings=settings,
         niche=settings.get("page_name") or profiles.get_page_name(user.uid),
         workspace_id=workspace_id,
+        timeline=timeline or None,
     )
 
     worker: FilmWorker = request.app.state.film_worker
@@ -306,7 +318,8 @@ def _base_settings(
         "speech_rate", "pacing",
         "hook", "hook_style", "hook_text", "hook_subtext", "hook_duration",
         "captions", "caption_style", "font_size", "words_per_line", "caption_position",
-        "music", "music_volume", "transition", "reframe",
+        "music", "music_volume", "transition", "transition_duration", "reframe",
+        "color_brightness", "color_contrast", "color_saturation", "normalize_audio",
         "show_page_name", "page_name", "voice",
         # Output shape: a ratio from pipeline.aspect, or explicit pixels.
         "aspect", "width", "height",
@@ -341,7 +354,8 @@ def _merge_production_settings(outline: dict, settings: dict, user_uid: str) -> 
         "speech_rate", "pacing",
         "hook", "hook_style", "hook_text", "hook_subtext", "hook_duration",
         "captions", "caption_style", "font_size", "words_per_line", "caption_position",
-        "music", "music_volume", "transition", "reframe",
+        "music", "music_volume", "transition", "transition_duration", "reframe",
+        "color_brightness", "color_contrast", "color_saturation", "normalize_audio",
         "show_page_name", "page_name", "voice",
         # Output shape: a ratio from pipeline.aspect, or explicit pixels.
         "aspect", "width", "height",
@@ -403,90 +417,6 @@ async def validate_film_package(
             ),
         ),
     }
-
-
-@router.post("/podcasts", response_model=CreateOut, status_code=status.HTTP_201_CREATED)
-async def create_podcast(
-    payload: PodcastCreate,
-    request: Request,
-    user: CurrentUser = Depends(get_current_user),
-):
-    s: Settings = request.app.state.settings
-    rate_limiter.check(user.uid, s.rate_limit_per_min)
-
-    if not s.studio_enabled:
-        raise HTTPException(
-            status_code=503,
-            detail="AI Studio isn't configured. Set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID to generate podcasts.",
-        )
-
-    topic = payload.topic.strip()
-    turns_count = max(2, min(int(payload.turns_count), int(s.podcast_max_turns)))
-    hosts = []
-    for c in payload.hosts:
-        if not (c.name or "").strip():
-            continue
-        host_voice = (c.voice or "").strip()
-        voice_refs.owned_clone_ref(host_voice, user.uid)
-        hosts.append(
-            {"name": c.name.strip(), "description": c.description.strip(), "voice": host_voice}
-        )
-
-    # Same promise as films: a saved character named in the topic joins the
-    # cast, and blank description/voice fields adopt the saved identity.
-    _adopt_saved_cast(user.uid, topic, hosts)
-
-    # One portrait run per host + one shot run per turn (lip-sync or motion)
-    # + one run per distinct cloned host voice. Turns aren't written until the
-    # agent runs, so this assumes every host speaks (over-counts hosts the agent
-    # never gives a line to); the worker re-checks the exact number before
-    # spending anything, so the guard never lets a ~quota-busted episode start.
-    clone_hosts = {c["voice"] for c in hosts if is_clone_voice(c["voice"])}
-    runs_needed = max(2, len(hosts)) + turns_count + len(clone_hosts)
-    used = studio_service.daily_used(user.uid)
-    remaining = max(0, int(s.studio_max_runs_per_day) - used)
-    if remaining < runs_needed:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"~{turns_count} talking turns need about {runs_needed} AI Studio runs, "
-                f"but only {remaining} of your daily quota ({s.studio_max_runs_per_day}) "
-                "is left. Shorten the episode or try again tomorrow."
-            ),
-        )
-
-    podcast = {
-        "mode": "podcast",
-        "topic": topic,
-        "turns_count": turns_count,
-        "hosts": hosts,
-        "lip_sync": bool(payload.lip_sync),
-        "research": bool(payload.research),
-        "aspect": _validate_aspect(payload.aspect),
-    }
-
-    settings = _base_settings(
-        user.uid, payload.captions, payload.music, payload.music_volume, payload.aspect
-    )
-    narrator_voice = voice_refs.owned_clone_ref((payload.voice or "").strip(), user.uid)
-    if narrator_voice:
-        settings["voice"] = (payload.voice or "").strip()
-    music = (settings.get("music") or "").strip()
-    if music.startswith("media/") and not music.startswith(f"media/{user.uid}/"):
-        raise HTTPException(status_code=400, detail="Music track does not belong to you.")
-
-    job_id = jobs_service.create_film_job(
-        uid=user.uid,
-        title=topic[:120],
-        film=podcast,
-        settings=settings,
-        niche=settings.get("page_name") or profiles.get_page_name(user.uid),
-    )
-
-    worker: FilmWorker = request.app.state.film_worker
-    await worker.submit(job_id)
-
-    return CreateOut(job_id=job_id)
 
 
 # --------------------------------------------------------------------------

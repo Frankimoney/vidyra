@@ -5,8 +5,10 @@ import type {
   LibraryItem,
   MusicUpload,
   PublicShare,
+  TimelineTracks,
   RecipeDraft,
   RecipeMeta,
+  Series,
   UsageSummary,
   Workspace,
   StoryboardCharacterInput,
@@ -354,6 +356,7 @@ export const api = {
     scenes?: StoryboardSceneInput[];
     characters?: StoryboardCharacterInput[];
     workspace_id?: string;
+    timeline?: TimelineTracks;
   }) =>
     request<{ job_id: string; status: string }>("/jobs", {
       method: "POST",
@@ -380,6 +383,8 @@ export const api = {
     lip_sync?: boolean;
     /** Brand workspace supplying look/voice defaults. */
     workspace_id?: string;
+    /** Titles, PiP/logo overlays and extra audio for the final cut. */
+    timeline?: TimelineTracks;
   }) =>
     request<{ job_id: string; status: string }>("/films", {
       method: "POST",
@@ -434,6 +439,43 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+  addWorkspaceMember: (
+    workspaceId: string,
+    member: { email?: string; uid?: string; role?: "editor" | "viewer" }
+  ) =>
+    request<Workspace>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/members`,
+      { method: "POST", body: JSON.stringify(member) }
+    ),
+  removeWorkspaceMember: (workspaceId: string, memberUid: string) =>
+    request<Workspace>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberUid)}`,
+      { method: "DELETE" }
+    ),
+  listSeries: () => request<{ items: Series[] }>("/series"),
+  createSeries: (payload: {
+    name: string;
+    interval_hours: number;
+    workspace_id?: string;
+    enabled?: boolean;
+    payload: Record<string, unknown>;
+  }) =>
+    request<Series>("/series", { method: "POST", body: JSON.stringify(payload) }),
+  updateSeries: (
+    seriesId: string,
+    patch: { name?: string; interval_hours?: number; enabled?: boolean; payload?: Record<string, unknown> }
+  ) =>
+    request<Series>(`/series/${encodeURIComponent(seriesId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSeries: (seriesId: string) =>
+    request<void>(`/series/${encodeURIComponent(seriesId)}`, { method: "DELETE" }),
+  runSeries: (seriesId: string) =>
+    request<{ job_id: string; status: string }>(
+      `/series/${encodeURIComponent(seriesId)}/run`,
+      { method: "POST" }
+    ),
   usageSummary: (workspaceId = "", days = 30) => {
     const q = new URLSearchParams({ days: String(days) });
     if (workspaceId) q.set("workspace_id", workspaceId);
@@ -495,25 +537,6 @@ export const api = {
   deleteCharacter: (characterId: string) =>
     request<void>(`/characters/${encodeURIComponent(characterId)}`, {
       method: "DELETE",
-    }),
-  createPodcast: (payload: {
-    topic: string;
-    turns_count: number;
-    hosts: { name: string; description: string; voice?: string }[];
-    /** Fallback voice for hosts without one: Piper name or "clone:<path>". */
-    voice?: string;
-    captions: boolean;
-    lip_sync: boolean;
-    music: string;
-    /** Background music level, 0-1. Defaults to 0.35 server-side. */
-    music_volume?: number;
-    research: boolean;
-    /** Output shape, e.g. "1:1". Omit for the vertical default. */
-    aspect?: string;
-  }) =>
-    request<{ job_id: string; status: string }>("/podcasts", {
-      method: "POST",
-      body: JSON.stringify(payload),
     }),
   listJobs: () => request<JobMeta[]>("/jobs"),
   mediaUrl: (jobId: string) =>

@@ -80,7 +80,7 @@ def _effective_mode(settings, src_path):
     return "crop"
 
 
-def _render_clip(kind, media, duration, index, settings, output, vf, complex_filter=False, trim_start: float = 0, focus=(0.5, 0.5), zoom: float = 1.0):
+def _render_clip(kind, media, duration, index, settings, output, vf, complex_filter=False, trim_start: float = 0, focus=(0.5, 0.5), zoom: float = 1.0, speed: float = 1.0, reverse: bool = False, motion: str = "auto", keyframes=None):
     """Cache-aware clip generation. Returns (output_path, cache_key_or_None).
 
     Blur renders use a labeled filter_complex graph ([v] output) because a
@@ -90,7 +90,7 @@ def _render_clip(kind, media, duration, index, settings, output, vf, complex_fil
     trim_start = max(0.0, float(trim_start or 0))
     key = None
     if getattr(settings, "cache_dir", ""):
-        key = clip_key(kind, media, duration, index, settings, trim_start, focus, zoom)
+        key = clip_key(kind, media, duration, index, settings, trim_start, focus, zoom, speed, reverse, motion, keyframes)
         hit = cache_get(settings.cache_dir, key, "clip", "mp4")
         if hit:
             return hit, key
@@ -105,11 +105,18 @@ def _render_clip(kind, media, duration, index, settings, output, vf, complex_fil
     # audio. tpad clones the final frame to cover the gap; -t still trims any
     # surplus, so clips with enough footage come out unchanged.
     pad = f"tpad=stop_mode=clone:stop_duration={duration:.3f}"
+    post = []
+    if kind == "video" and reverse:
+        post.append("reverse")
+    speed = max(0.25, min(4.0, float(speed or 1.0)))
+    if kind == "video" and abs(speed - 1.0) > 0.001:
+        post.append(f"setpts=PTS/{speed:.4f}")
+    post_s = (",".join(post) + ",") if post else ""
     if complex_filter:
-        vf = f"{vf};[v]{pad},fps={settings.fps}[vp]"
+        vf = f"{vf};[v]{post_s}{pad},fps={settings.fps}[vp]"
         map_args = ["-map", "[vp]"]
     else:
-        vf = f"{vf},{pad}"
+        vf = f"{vf},{post_s}{pad}"
         map_args = []
 
     # Built after `vf` is final — filter_args captures the string by value, so
@@ -136,7 +143,7 @@ def _render_clip(kind, media, duration, index, settings, output, vf, complex_fil
     return output, key
 
 
-def create_animated_image(image, duration, index, settings, focus=(0.5, 0.5), zoom=1.0):
+def create_animated_image(image, duration, index, settings, focus=(0.5, 0.5), zoom=1.0, motion="auto", keyframes=None):
     """Create a single animated (zoom-in/zoom-out) clip from an image."""
     output = os.path.join(settings.temp_dir, f"image_{index:03d}.mp4")
     w, h = settings.width, settings.height
@@ -145,44 +152,81 @@ def create_animated_image(image, duration, index, settings, focus=(0.5, 0.5), zo
     # zoom expression accumulates across the whole clip. Feeding a looped image
     # stream instead breaks the accumulation (each input frame restarts zoom).
     frames = max(1, int(round(duration * settings.fps)))
-    if index % 2 == 0:
-        zoom_filter = (
-            "zoompan="
-            "z='min(zoom+0.0008,1.12)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={w}x{h}:fps={settings.fps}"
-        )
+    kfs = [k for k in (keyframes or []) if isinstance(k, dict)]
+    kfs.sort(key=lambda k: float(k.get("t", 0)))
+    if len(kfs) >= 2:
+        start, end = kfs[0], kfs[-1]
+        denom = max(1, frames - 1)
+        z0 = max(1.0, min(3.0, float(start.get("zoom", 1.0))))
+        z1 = max(1.0, min(3.0, float(end.get("zoom", 1.0))))
+        fx0 = max(0.0, min(1.0, float(start.get("focusX", 0.5))))
+        fx1 = max(0.0, min(1.0, float(end.get("focusX", 0.5))))
+        fy0 = max(0.0, min(1.0, float(start.get("focusY", 0.5))))
+        fy1 = max(0.0, min(1.0, float(end.get("focusY", 0.5))))
+        zoom_expr = f"z='{z0}+({z1}-{z0})*on/{denom}':"
+        x_expr = f"x='(iw-iw/zoom)*({fx0}+({fx1}-{fx0})*on/{denom})'"
+        y_expr = f"y='(ih-ih/zoom)*({fy0}+({fy1}-{fy0})*on/{denom})'"
+        motion = "keyframes"
     else:
-        zoom_filter = (
-            "zoompan="
-            "z='if(lte(zoom,1.001),1.12,max(zoom-0.0008,1.0))':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={w}x{h}:fps={settings.fps}"
-        )
+        motion = (motion or "auto").strip()
+    if motion == "auto":
+        motion = "zoomIn" if index % 2 == 0 else "zoomOut"
+    centre = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+    if motion == "keyframes":
+        pass
+    elif motion == "zoomIn":
+        zoom_expr = "z='min(zoom+0.0008,1.12)':"
+        x_expr, y_expr = "x='iw/2-(iw/zoom/2)'", "y='ih/2-(ih/zoom/2)'"
+    elif motion == "zoomOut":
+        zoom_expr = "z='if(lte(zoom,1.001),1.12,max(zoom-0.0008,1.0))':"
+        x_expr, y_expr = "x='iw/2-(iw/zoom/2)'", "y='ih/2-(ih/zoom/2)'"
+    elif motion == "panLeft":
+        zoom_expr = "z='1.12':"
+        x_expr = f"x='(iw-iw/zoom)*(1-on/{max(1, frames - 1)})'"
+        y_expr = "y='ih/2-(ih/zoom/2)'"
+    elif motion == "panRight":
+        zoom_expr = "z='1.12':"
+        x_expr = f"x='(iw-iw/zoom)*(on/{max(1, frames - 1)})'"
+        y_expr = "y='ih/2-(ih/zoom/2)'"
+    else:
+        zoom_expr = "z='1':"
+        x_expr, y_expr = "x='iw/2-(iw/zoom/2)'", "y='ih/2-(ih/zoom/2)'"
+    zoom_filter = (
+        "zoompan=" + zoom_expr + x_expr + ":" + y_expr + ":"
+        f"d={frames}:s={w}x{h}:fps={settings.fps}"
+    )
 
     if _effective_mode(settings, image) == "blur":
         vf = _blur_fit_image(w, h, zoom_filter)
         complex_filter = True
     else:
         fx, fy = focus
-        vf = f"{_cover(w, h, fx, fy, zoom)},{zoom_filter}"
+        base = _cover(w, h, 0.5, 0.5, 1.0) if motion == "keyframes" else _cover(w, h, fx, fy, zoom)
+        vf = f"{base},{zoom_filter}"
         complex_filter = False
 
     path, key = _render_clip(
         "image", image, duration, index, settings, output, vf,
-        complex_filter=complex_filter, focus=focus, zoom=zoom,
+        complex_filter=complex_filter, focus=focus, zoom=zoom, motion=motion,
+        keyframes=keyframes,
     )
     if path == output and key:
         cache_put(output, settings.cache_dir, key, "clip", "mp4")
     return path
 
 
-def process_video_clip(video_path, duration, settings, index=0, trim_start: float = 0, focus=(0.5, 0.5), zoom=1.0):
+def process_video_clip(video_path, duration, settings, index=0, trim_start: float = 0, focus=(0.5, 0.5), zoom=1.0, speed=1.0, reverse=False, freeze=False, motion="auto", keyframes=None):
     """Reframe a video to the output aspect, mute it, seek to trim_start, clip to duration."""
     output = os.path.join(settings.temp_dir, f"video_{index:03d}.mp4")
     w, h = settings.width, settings.height
+
+    if freeze:
+        frame = os.path.join(settings.temp_dir, f"freeze_{index:03d}.png")
+        seek = ["-ss", str(max(0.0, float(trim_start or 0)))] if trim_start else []
+        run_cmd(["ffmpeg", "-y"] + seek + ["-i", video_path, "-frames:v", "1", frame])
+        return create_animated_image(
+            frame, duration, index, settings, focus, zoom, motion, keyframes
+        )
 
     if _effective_mode(settings, video_path) == "blur":
         vf = _blur_fit_video(w, h)
@@ -195,6 +239,7 @@ def process_video_clip(video_path, duration, settings, index=0, trim_start: floa
     path, key = _render_clip(
         "video", video_path, duration, index, settings, output, vf,
         complex_filter=complex_filter, trim_start=trim_start, focus=focus, zoom=zoom,
+        speed=speed, reverse=reverse, motion=motion, keyframes=keyframes,
     )
     if path == output and key:
         cache_put(output, settings.cache_dir, key, "clip", "mp4")

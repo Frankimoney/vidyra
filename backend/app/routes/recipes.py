@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from ..auth import CurrentUser, get_current_user
 from ..services import recipes as recipe_service
@@ -58,7 +59,7 @@ async def draft_recipe(
     payload["workspace_id"] = body.workspace_id
 
     try:
-        result = module.draft(payload, defaults, aspect)
+        result = await run_in_threadpool(module.draft, payload, defaults, aspect)
     except RecipeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:  # noqa: BLE001 - draft must never 500 the hub

@@ -301,6 +301,15 @@ async def create_job(
     storyboard = bool(payload.scenes)
     scenes = _normalize_scenes(payload.scenes, storage, user.uid, s.max_media_count) if storyboard else []
     characters = _normalize_characters(payload.characters, user.uid)
+    timeline = payload.timeline if isinstance(payload.timeline, dict) else {}
+    timeline_paths = [
+        {"path": item.get("path", "")}
+        for key in ("overlays", "audio")
+        for item in (timeline.get(key) or [])
+        if isinstance(item, dict) and (item.get("path") or "").strip()
+    ]
+    if timeline_paths:
+        _check_media_ownership(timeline_paths, storage, user.uid)
 
     if storyboard:
         script = (payload.script or "").strip() or "\n\n".join(
@@ -333,7 +342,8 @@ async def create_job(
         "voice", "speech_rate", "pacing",
         "hook", "hook_style", "hook_text", "hook_subtext", "hook_duration",
         "captions", "caption_style", "font_size", "words_per_line", "caption_position",
-        "music", "music_volume", "transition", "reframe",
+        "music", "music_volume", "transition", "transition_duration", "reframe",
+        "color_brightness", "color_contrast", "color_saturation", "normalize_audio",
         "show_page_name", "page_name",
         # Output shape. "aspect" is a ratio from pipeline.aspect ("auto" keeps
         # the default 9:16 canvas); explicit width/height win when both are sent.
@@ -409,6 +419,7 @@ async def create_job(
         scenes=scenes or None,
         characters=characters or None,
         workspace_id=workspace_id,
+        timeline=timeline or None,
     )
 
     worker: VideoWorker = request.app.state.worker

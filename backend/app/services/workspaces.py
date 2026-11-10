@@ -39,7 +39,12 @@ DEFAULT_KEYS = (
     "music",
     "music_volume",
     "transition",
+    "transition_duration",
     "reframe",
+    "color_brightness",
+    "color_contrast",
+    "color_saturation",
+    "normalize_audio",
     "show_page_name",
     "page_name",
     "aspect",
@@ -98,12 +103,19 @@ def _seed_doc(uid: str) -> dict:
             "music": "",
             "music_volume": 0.35,
             "transition": "Auto",
+            "transition_duration": 0.5,
             "reframe": "auto",
+            "color_brightness": 0.0,
+            "color_contrast": 1.0,
+            "color_saturation": 1.0,
+            "normalize_audio": True,
             "show_page_name": True,
             "page_name": SEED_PAGE_NAME,
             "aspect": "9:16",
         },
         "budget": {"dailyRuns": 0},
+        "members": [],
+        "memberUids": [],
         "createdAt": now,
         "updatedAt": now,
     }
@@ -132,12 +144,12 @@ def _clean_defaults(raw) -> dict:
             value = value if value in aspect_lib.ASPECT_CHOICES else "9:16"
         elif key in ("music", "voice", "caption_style", "caption_position", "pacing", "transition", "reframe", "hook_style", "page_name"):
             value = str(value or "")[:300]
-        elif key in ("speech_rate", "font_size", "words_per_line", "hook_duration", "music_volume"):
+        elif key in ("speech_rate", "font_size", "words_per_line", "hook_duration", "music_volume", "transition_duration", "color_brightness", "color_contrast", "color_saturation"):
             try:
                 value = float(value)
             except (TypeError, ValueError):
                 continue
-        elif key in ("hook", "captions", "show_page_name"):
+        elif key in ("hook", "captions", "show_page_name", "normalize_audio"):
             value = bool(value)
         clean[key] = value
     return clean
@@ -170,6 +182,7 @@ def _as_out(doc: dict) -> dict:
         "brand": doc.get("brand") or {"primary": "", "secondary": "", "logoPath": ""},
         "defaults": doc.get("defaults") or {},
         "budget": doc.get("budget") or {"dailyRuns": 0},
+        "members": doc.get("members") or [],
         "created_at": doc.get("createdAt") or "",
         "updated_at": doc.get("updatedAt") or "",
     }
@@ -193,10 +206,15 @@ def get_doc(workspace_id: str) -> dict | None:
 
 
 def owner_workspace(workspace_id: str, uid: str) -> dict:
+    """Return a workspace the user owns or belongs to."""
     doc = get_doc(workspace_id)
-    if not doc or doc.get("ownerUid") != uid:
+    if not doc:
         raise KeyError(workspace_id)
-    return doc
+    if doc.get("ownerUid") == uid:
+        return doc
+    if uid in (doc.get("memberUids") or []):
+        return doc
+    raise KeyError(workspace_id)
 
 
 def ensure_default(uid: str) -> dict:
@@ -215,15 +233,19 @@ def ensure_default(uid: str) -> dict:
 def list_workspaces(uid: str) -> list[dict]:
     ensure_default(uid)
     if _using_dev_store():
-        docs = [dict(d) for d in _memory_store.values() if d.get("ownerUid") == uid]
-    else:
         docs = [
-            snap.to_dict()
-            for snap in _db()
-            .collection(COLLECTION)
-            .where("ownerUid", "==", uid)
-            .stream()
+            dict(d) for d in _memory_store.values()
+            if d.get("ownerUid") == uid or uid in (d.get("memberUids") or [])
         ]
+    else:
+        merged = {}
+        for snap in _db().collection(COLLECTION).where("ownerUid", "==", uid).stream():
+            merged[snap.id] = snap.to_dict()
+        for snap in (
+            _db().collection(COLLECTION).where("memberUids", "array_contains", uid).stream()
+        ):
+            merged[snap.id] = snap.to_dict()
+        docs = list(merged.values())
     docs.sort(key=lambda d: d.get("createdAt") or "")
     return docs
 
@@ -237,6 +259,12 @@ def create_workspace(uid: str, payload: dict) -> dict:
 
 def update_workspace(uid: str, workspace_id: str, patch: dict) -> dict:
     doc = owner_workspace(workspace_id, uid)
+    if doc.get("ownerUid") != uid:
+        member = next(
+            (m for m in doc.get("members") or [] if m.get("uid") == uid), {}
+        )
+        if member.get("role") != "editor":
+            raise KeyError(workspace_id)
     updated = dict(doc)
     if "name" in patch:
         updated["name"] = str(patch.get("name") or "").strip()[:80] or updated.get("name")
@@ -313,3 +341,37 @@ def apply_defaults(
 
 def out(doc: dict) -> dict:
     return _as_out(doc)
+
+
+def add_member(uid: str, workspace_id: str, member_uid: str, email: str, role: str) -> dict:
+    doc = owner_workspace(workspace_id, uid)
+    if doc.get("ownerUid") != uid:
+        raise KeyError(workspace_id)
+    role = role if role in ("editor", "viewer") else "viewer"
+    members = [
+        m for m in (doc.get("members") or [])
+        if isinstance(m, dict) and m.get("uid") != member_uid
+    ]
+    members.append({"uid": member_uid, "email": email or "", "role": role})
+    member_uids = sorted({m["uid"] for m in members if m.get("uid")})
+    updated = dict(doc) | {"members": members, "memberUids": member_uids}
+    updated["updatedAt"] = _now_stamp()
+    _store_set(workspace_id, updated)
+    return updated
+
+
+def remove_member(uid: str, workspace_id: str, member_uid: str) -> dict:
+    doc = owner_workspace(workspace_id, uid)
+    if doc.get("ownerUid") != uid:
+        raise KeyError(workspace_id)
+    members = [
+        m for m in (doc.get("members") or [])
+        if isinstance(m, dict) and m.get("uid") != member_uid
+    ]
+    updated = dict(doc) | {
+        "members": members,
+        "memberUids": sorted({m.get("uid") for m in members if m.get("uid")}),
+    }
+    updated["updatedAt"] = _now_stamp()
+    _store_set(workspace_id, updated)
+    return updated

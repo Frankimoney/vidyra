@@ -217,6 +217,8 @@ def _normalize_scenes(data, characters, issues):
             "setting": setting,
             "shot": shot,
             "transition": str(s.get("transition", "") or ""),
+            # A creator-selected take (Studio image) can replace generation.
+            "reference_image": str(s.get("reference_image", "") or ""),
         })
     return scenes
 

@@ -164,16 +164,23 @@ class VideoWorker:
         all_media: list = []
         for si, scene in enumerate(job.get("scenes") or []):
             paths, durations, trims, foci, zooms = [], [], [], [], []
+            speeds, reverses, freezes, motions, keyframes = [], [], [], [], []
             for mi, item in enumerate(scene.get("media") or []):
                 if isinstance(item, str):
                     storage_path, duration, trim = item, None, 0
                     focus, zoom = (0.5, 0.5), 1.0
+                    speed, reverse, freeze, motion, kfs = 1.0, False, False, "auto", []
                 else:
                     storage_path = item.get("path", "")
                     duration = item.get("duration")
                     trim = item.get("trimStart", 0)
                     focus = (item.get("focusX", 0.5), item.get("focusY", 0.5))
                     zoom = item.get("zoom", 1.0)
+                    speed = item.get("speed", 1.0)
+                    reverse = bool(item.get("reverse"))
+                    freeze = bool(item.get("freeze"))
+                    motion = item.get("motion", "auto")
+                    kfs = item.get("keyframes") or []
                 if not storage_path:
                     continue
                 ext = os.path.splitext(storage_path)[1].lower()
@@ -200,6 +207,27 @@ class VideoWorker:
                     zooms.append(max(1.0, min(3.0, float(zoom))))
                 except (TypeError, ValueError):
                     zooms.append(1.0)
+                try:
+                    speeds.append(max(0.25, min(4.0, float(speed))))
+                except (TypeError, ValueError):
+                    speeds.append(1.0)
+                reverses.append(reverse)
+                freezes.append(freeze)
+                motions.append(str(motion or "auto"))
+                clean_kfs = []
+                for kf in (kfs if isinstance(kfs, list) else []):
+                    if not isinstance(kf, dict):
+                        continue
+                    try:
+                        clean_kfs.append({
+                            "t": max(0.0, min(1.0, float(kf.get("t", 0)))),
+                            "zoom": max(1.0, min(3.0, float(kf.get("zoom", 1.0)))),
+                            "focusX": max(0.0, min(1.0, float(kf.get("focusX", 0.5)))),
+                            "focusY": max(0.0, min(1.0, float(kf.get("focusY", 0.5)))),
+                        })
+                    except (TypeError, ValueError):
+                        continue
+                keyframes.append(clean_kfs)
             if not paths:
                 raise PipelineError(f"Scene {si + 1} has no media.")
             all_media.extend(paths)
@@ -211,6 +239,11 @@ class VideoWorker:
                 "trim_starts": trims,
                 "clip_focus": foci,
                 "clip_zoom": zooms,
+                "clip_speeds": speeds,
+                "clip_reverse": reverses,
+                "clip_freeze": freezes,
+                "clip_motions": motions,
+                "clip_keyframes": keyframes,
                 "transition": scene.get("transition"),
                 "dialogue_voices": dialogue_voices,
             }
@@ -588,8 +621,45 @@ class VideoWorker:
             return tracks[name]
         raise PipelineError(f"Music track not found: {name}")
 
+    def _resolve_timeline(self, job, work_dir):
+        """Stage creator timeline tracks under the job work dir.
+
+        Only owners of these storage paths can reach this point (routes check),
+        but the worker still resolves through the storage driver so local and
+        Firebase backends behave the same.
+        """
+        timeline = job.get("timeline") or {}
+        root = os.path.join(work_dir, "timeline")
+        os.makedirs(root, exist_ok=True)
+        texts = [
+            dict(t) for t in (timeline.get("texts") or [])
+            if isinstance(t, dict) and str(t.get("text") or "").strip()
+        ]
+        overlays = []
+        for i, item in enumerate(timeline.get("overlays") or []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            if not path:
+                continue
+            ext = os.path.splitext(path)[1] or ".png"
+            local = self.storage.resolve(path, os.path.join(root, f"overlay_{i}{ext}"))
+            overlays.append({**item, "path": local, "kind": classify_media(path) or item.get("kind") or "image"})
+        audio = []
+        for i, item in enumerate(timeline.get("audio") or []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            if not path:
+                continue
+            ext = os.path.splitext(path)[1] or ".mp3"
+            local = self.storage.resolve(path, os.path.join(root, f"audio_{i}{ext}"))
+            audio.append({**item, "path": local})
+        return texts, overlays, audio
+
     def _build_settings(self, job, media_local, clip_durations, cover_local, voice_path, music_path, work_dir, trim_starts=None, clip_focus=None, clip_zoom=None, target_duration=0.0):
         s = job.get("settings") or {}
+        timeline_texts, timeline_overlays, timeline_audio = self._resolve_timeline(job, work_dir)
         # Output shape: an explicit aspect ratio wins, then explicit pixels,
         # then RenderSettings' own default. Previously nothing was passed and
         # every product rendered 1080x1920 regardless of what the user asked
@@ -634,9 +704,17 @@ class VideoWorker:
             music_path=music_path,
             music_volume=clamp_music_volume(s.get("music_volume")),
             transition=s.get("transition", "Auto"),
+            transition_duration=bounded_float(s.get("transition_duration", 0.5), 0.5, 0.1, 2.0),
             reframe=s.get("reframe", "auto"),
+            color_brightness=bounded_float(s.get("color_brightness", 0.0), 0.0, -1.0, 1.0),
+            color_contrast=bounded_float(s.get("color_contrast", 1.0), 1.0, 0.5, 2.0),
+            color_saturation=bounded_float(s.get("color_saturation", 1.0), 1.0, 0.0, 2.0),
+            normalize_audio=bool(s.get("normalize_audio", False)),
             page_name=(s.get("page_name") or "").strip() or (job.get("niche") or "").strip(),
             show_page_name=bool(s.get("show_page_name", True)),
+            timeline_texts=timeline_texts,
+            timeline_overlays=timeline_overlays,
+            timeline_audio=timeline_audio,
             temp_dir=os.path.join(work_dir, "tmp"),
             output_path=os.path.join(work_dir, "final.mp4"),
             cache_dir=os.path.join(

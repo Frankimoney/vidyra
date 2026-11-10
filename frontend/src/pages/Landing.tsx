@@ -28,7 +28,7 @@ export default function Landing() {
         </h2>
         <p className="tagline">
           Script → voice → visuals → captions → a ready 9:16 video. AI films,
-          podcasts, and talking-head clips, all from one place.
+          talking-head clips and narrated stories, all from one place.
         </p>
         <div className="btn-row" style={{ marginTop: 22 }}>
           <Link to="/login?mode=signup" style={{ flex: 1, textDecoration: "none" }}>

@@ -240,6 +240,11 @@ def generate_video(settings, whisper_model=None, on_progress=None, on_stage=None
         trim_starts=getattr(settings, "trim_starts", None),
         focuses=getattr(settings, "clip_focus", None),
         zooms=getattr(settings, "clip_zoom", None),
+        speeds=getattr(settings, "clip_speeds", None),
+        reverses=getattr(settings, "clip_reverse", None),
+        freezes=getattr(settings, "clip_freeze", None),
+        motions=getattr(settings, "clip_motions", None),
+        keyframes=getattr(settings, "clip_keyframes", None),
     )
     reporter.update("visuals", 85, "Visual track ready")
 

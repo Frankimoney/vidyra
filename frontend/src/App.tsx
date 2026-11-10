@@ -51,8 +51,10 @@ class ErrorBoundary extends React.Component<
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import Landing from "./pages/Landing";
-import Create from "./pages/Create";
+import NewVideo from "./pages/NewVideo";
+import Workspace from "./pages/Workspace";
 import Studio from "./pages/Studio";
+import SeriesPage from "./pages/SeriesPage";
 import Film from "./pages/Film";
 import Characters from "./pages/Characters";
 import Editor from "./pages/Editor";
@@ -116,7 +118,9 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/create" element={<Create />} />
+        <Route path="/new" element={<NewVideo />} />
+        <Route path="/workspace" element={<Workspace />} />
+        <Route path="/create" element={<Navigate to="/editor" replace />} />
         <Route path="/studio" element={<Studio />} />
         <Route path="/film" element={<Film />} />
         <Route path="/characters" element={<Characters />} />
@@ -125,7 +129,10 @@ export default function App() {
         <Route path="/storyboard" element={<Navigate to="/editor" replace />} />
         <Route path="/edit/:jobId" element={<Editor />} />
         <Route path="/videos" element={<MyVideos />} />
+        <Route path="/series" element={<SeriesPage />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/account" element={<Navigate to="/profile" replace />} />
+        <Route path="/user" element={<Navigate to="/profile" replace />} />
         <Route path="/job/:jobId" element={<JobStatus />} />
       </Route>
 

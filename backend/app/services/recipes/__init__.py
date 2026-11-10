@@ -7,10 +7,10 @@ returns a validated production package without spending GPU time.
 
 from __future__ import annotations
 
-from . import game_recap, news, player_story
+from . import custom, game_recap, news, player_story
 from .base import RecipeError
 
-_MODULES = (news, player_story, game_recap)
+_MODULES = (news, player_story, game_recap, custom)
 RECIPES = {mod.META["id"]: mod for mod in _MODULES}
 
 

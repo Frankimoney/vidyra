@@ -422,8 +422,8 @@ function CompletedView({ jobId, title, output }: { jobId: string; title: string;
         <Button variant="ghost">✎ Edit this video</Button>
       </Link>
 
-      <Link to="/create" style={{ textDecoration: "none" }}>
-        <Button>+ Create Another Video</Button>
+      <Link to="/new" style={{ textDecoration: "none" }}>
+        <Button>+ New video</Button>
       </Link>
 
       <Link to={`/videos?from=${jobId}`} style={{ textDecoration: "none" }}>
@@ -481,7 +481,7 @@ function FailedView({ job }: { job: any }) {
       <Button variant="primary" loading={busy} onClick={retry}>
         ↻ Retry with the same settings
       </Button>
-      <Link to="/create" style={{ textDecoration: "none" }}>
+      <Link to="/new" style={{ textDecoration: "none" }}>
         <Button variant="ghost">Start Something New</Button>
       </Link>
     </div>

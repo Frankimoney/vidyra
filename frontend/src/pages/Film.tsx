@@ -36,7 +36,9 @@ interface CharDraft {
 let _seq = 0;
 const nextId = () => `c${Date.now().toString(36)}${(_seq++).toString(36)}`;
 
-export default function Film() {
+type Mode = "film" | "director";
+
+export default function Film({ forcedMode }: { forcedMode?: Mode } = {}) {
   const toast = useToast();
   const navigate = useNavigate();
   const [search] = useSearchParams();
@@ -47,17 +49,14 @@ export default function Film() {
   const linkedMode = search.get("mode");
   const linkedIdea = search.get("idea") || "";
 
-  const [mode, setMode] = useState<"film" | "podcast" | "director">(
-    linkedMode === "director" || linkedMode === "podcast" || linkedMode === "film"
-      ? linkedMode
-      : "film"
+  const [mode, setMode] = useState<Mode>(
+    forcedMode ??
+      (linkedMode === "director" || linkedMode === "film" ? linkedMode : "director")
   );
   const [idea, setIdea] = useState(linkedIdea);
   const [style, setStyle] = useState("cinematic");
   const [scenesCount, setScenesCount] = useState(8);
-  const [turnsCount, setTurnsCount] = useState(8);
   // Solo default: lip-sync OFF (biggest GPU cost + failure point — enable per hero video).
-  const [lipSync, setLipSync] = useState(false);
   const [captions, setCaptions] = useState(true);
   const [music, setMusic] = useState<string[]>([]);
   const [chosenMusic, setChosenMusic] = useState("");
@@ -198,23 +197,6 @@ export default function Film() {
     setSubmitting(true);
     setError("");
     try {
-      if (mode === "podcast") {
-        const res = await api.createPodcast({
-          topic: trimmedIdea,
-          turns_count: turnsCount,
-          hosts: cleanChars,
-          captions,
-          lip_sync: lipSync,
-          music: chosenMusic,
-          music_volume: musicVolume,
-          research,
-          voice: narratorVoice,
-          aspect,
-        });
-        toast("Podcast is being written and recorded.", "success");
-        navigate(`/job/${res.job_id}`);
-        return;
-      }
       const res = await api.createFilm({
         idea: packageMode ? "" : trimmedIdea,
         outline: packageMode ? trimmedIdea : "",
@@ -260,31 +242,29 @@ export default function Film() {
     <div className="fade-up" style={{ paddingBottom: 24 }}>
       <header style={{ marginBottom: 18 }}>
         <h2 style={{ marginTop: 0 }}>
-          {mode === "podcast" ? "🎙️ AI Podcast" : mode === "director" ? "🎬 Director" : "🎬 Auto Film"}
+          {mode === "director" ? "🎬 Director" : "🎬 Advanced film"}
         </h2>
         <p className="faint" style={{ fontSize: "0.88rem", marginTop: -4 }}>
-          {mode === "podcast"
-            ? "Pick a topic and get a talking-head podcast video: Vidyra writes the episode, designs both hosts, records the conversation in natural voices, and edits it into a finished video."
-            : mode === "director"
+          {mode === "director"
             ? "Plan the film with an agent before spending anything. It asks what it needs, drafts a production plan you can edit, and only films once you approve."
-            : "Describe an idea in one line, or paste a full production package from ChatGPT (text or JSON with camera angles, scenes and dialogue) — Vidyra writes what's missing, films every scene with AI, adds voices, and edits it into a finished video."}
+            : "Advanced: describe an idea in one line, or paste a full production package from ChatGPT (text or JSON with camera angles, scenes and dialogue). For guided recipes use New video."}
         </p>
       </header>
 
+      {!forcedMode && (
       <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
         <div
           className="spread"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(2, 1fr)",
             gap: 8,
           }}
         >
           {(
             [
-              { id: "film" as const, label: "🎬 Movie" },
+              { id: "film" as const, label: "⚙️ Advanced" },
               { id: "director" as const, label: "🎬 Director" },
-              { id: "podcast" as const, label: "🎙️ Podcast" },
             ]
           ).map((m) => (
             <button
@@ -309,6 +289,7 @@ export default function Film() {
           ))}
         </div>
       </div>
+      )}
 
       <div style={{ display: "grid", gap: 18 }}>
         {mode === "director" ? (
@@ -329,15 +310,13 @@ export default function Film() {
         ) : (
           <>
         <Card>
-          <Field label={mode === "podcast" ? "Podcast topic" : "Film idea or production package"}>
+          <Field label="Film idea or production package">
             <textarea
               className="input"
               rows={packageMode ? 6 : 3}
-              maxLength={mode === "podcast" ? 2000 : 40000}
+              maxLength={40000}
               placeholder={
-                mode === "podcast"
-                  ? "e.g. Why everyone is suddenly talking about sleep — and what actually works"
-                  : "e.g. A young inventor on a rainy island discovers a machine that can speak to birds — and must use it to save her town.\n\n…or paste a full production package (text or JSON) from ChatGPT with camera angles, scenes and dialogue."
+                "e.g. A young inventor on a rainy island discovers a machine that can speak to birds — and must use it to save her town.\n\n…or paste a full production package (text or JSON) from ChatGPT with camera angles, scenes and dialogue."
               }
               value={idea}
               onChange={(e) => setIdea(e.target.value)}
@@ -394,7 +373,6 @@ export default function Film() {
             </div>
           )}
 
-          {mode === "film" ? (
             packageMode ? (
               <div
                 style={{
@@ -441,34 +419,6 @@ export default function Film() {
                 </div>
               </>
             )
-          ) : (
-            <>
-              <Field label={`Episode length: ${turnsCount} talking turns`}>
-                <input
-                  type="range"
-                  min={2}
-                  max={12}
-                  step={1}
-                  value={turnsCount}
-                  onChange={(e) => setTurnsCount(Number(e.target.value))}
-                  style={{ width: "100%" }}
-                />
-              </Field>
-              <div className="faint" style={{ fontSize: "0.78rem", marginTop: 4 }}>
-                Each turn uses 1 AI run, plus 1 portrait per host (2–4 runs total).
-                Longer episodes use more of your daily quota.
-                <span style={{ marginLeft: 8 }}><StudioQuotaMeter /></span>
-              </div>
-              <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-                <Toggle
-                  on={lipSync}
-                  onChange={setLipSync}
-                  label="Lip-sync: hosts' mouths move with the words"
-                />
-              </div>
-            </>
-          )}
-
           <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
             <Toggle on={captions} onChange={setCaptions} label="Captions" />
           </div>
@@ -540,23 +490,20 @@ export default function Film() {
           <div className="spread" style={{ marginBottom: 8 }}>
             <div>
               <div style={{ fontWeight: 700 }}>
-                {mode === "podcast" ? "Hosts" : "Characters"}
+                Characters
               </div>
               <div className="faint" style={{ fontSize: "0.82rem" }}>
-                {mode === "podcast"
-                  ? "Optional. Add 1–2 hosts (or 3–4); Vidyra designs a consistent look and assigns each a unique voice."
-                  : "Optional. Descriptions steer the AI shots; set a voice per character or let Vidyra assign one."}
+                Optional. Descriptions steer the AI shots; set a voice per
+                character or let Vidyra assign one.
               </div>
             </div>
             <Button onClick={addCharacter}>
-              {mode === "podcast" ? "＋ Host" : "＋ Character"}
+              ＋ Character
             </Button>
           </div>
           {characters.length === 0 ? (
             <div className="faint" style={{ fontSize: "0.85rem" }}>
-              {mode === "podcast"
-                ? "No hosts — Vidyra will create Alex and Sam."
-                : "No characters — Vidyra will invent them."}
+              No characters — Vidyra will invent them.
             </div>
           ) : (
             <div className="stack-v">
@@ -565,7 +512,7 @@ export default function Film() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
                     <input
                       className="input"
-                      placeholder={mode === "podcast" ? "Host name (e.g. Alex)" : "Name (e.g. Ava)"}
+                      placeholder="Name (e.g. Ava)"
                       value={c.name}
                       onChange={(e) =>
                         setCharacters((prev) =>
@@ -586,11 +533,7 @@ export default function Film() {
                   </div>
                   <input
                     className="input"
-                    placeholder={
-                      mode === "podcast"
-                        ? "Appearance & personality (e.g. a friendly tech journalist in a denim jacket)"
-                        : "Appearance (e.g. a 12-year-old with a red raincoat)"
-                    }
+                    placeholder="Appearance (e.g. a 12-year-old with a red raincoat)"
                     value={c.description}
                     onChange={(e) =>
                       setCharacters((prev) =>
@@ -728,13 +671,7 @@ export default function Film() {
           disabled={submitting}
           style={{ width: "100%" }}
         >
-          {submitting ? (
-            <Spinner />
-          ) : mode === "podcast" ? (
-            "🎙️ Generate my podcast"
-          ) : (
-            "🎬 Generate my film"
-          )}
+          {submitting ? <Spinner /> : "🎬 Generate my film"}
         </Button>
           </>
         )}

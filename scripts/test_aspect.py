@@ -190,10 +190,9 @@ try:
 except HTTPException as exc:
     check("film rejects an unknown ratio", exc.status_code == 400, str(exc.status_code))
 
-from app.models import FilmCreate, PodcastCreate  # noqa: E402
+from app.models import FilmCreate  # noqa: E402
 
 check("FilmCreate accepts an aspect", FilmCreate(idea="x", aspect="16:9").aspect == "16:9")
-check("PodcastCreate accepts an aspect", PodcastCreate(topic="x", aspect="1:1").aspect == "1:1")
 check("FilmCreate aspect defaults to auto", FilmCreate(idea="x").aspect == aspect_lib.AUTO)
 
 # ---------------------------------------------------------------------------

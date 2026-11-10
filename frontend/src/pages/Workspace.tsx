@@ -39,6 +39,10 @@ export default function Workspace() {
   const [primary, setPrimary] = useState("");
   const [secondary, setSecondary] = useState("");
   const [dailyRuns, setDailyRuns] = useState(0);
+  const [memberEmail, setMemberEmail] = useState("");
+  const [memberUid, setMemberUid] = useState("");
+  const [memberRole, setMemberRole] = useState<"editor" | "viewer">("editor");
+  const [memberBusy, setMemberBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -116,6 +120,44 @@ export default function Workspace() {
       toast((e as Error).message || "Could not save the workspace.", "error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function addMember() {
+    if (!workspace) return;
+    if (!memberEmail.trim() && !memberUid.trim()) {
+      toast("Add an email or user id.", "error");
+      return;
+    }
+    setMemberBusy(true);
+    try {
+      const updated = await api.addWorkspaceMember(workspace.workspace_id, {
+        email: memberEmail.trim() || undefined,
+        uid: memberUid.trim() || undefined,
+        role: memberRole,
+      });
+      setWorkspace(updated);
+      setMemberEmail("");
+      setMemberUid("");
+      toast("Member added.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Could not add that member.", "error");
+    } finally {
+      setMemberBusy(false);
+    }
+  }
+
+  async function removeMember(uid: string) {
+    if (!workspace) return;
+    setMemberBusy(true);
+    try {
+      const updated = await api.removeWorkspaceMember(workspace.workspace_id, uid);
+      setWorkspace(updated);
+      toast("Member removed.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Could not remove that member.", "error");
+    } finally {
+      setMemberBusy(false);
     }
   }
 
@@ -256,6 +298,45 @@ export default function Workspace() {
             dailyRuns={workspace.budget?.dailyRuns || 0}
             refreshKey={refresh}
           />
+          <Card>
+            <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 8 }}>Team</div>
+            <div style={{ display: "grid", gap: 6 }}>
+              {(workspace.members || []).map((m) => (
+                <div key={m.uid} className="spread" style={{ gap: 8, fontSize: "0.82rem" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.email || m.uid}
+                  </span>
+                  <span className="faint">{m.role}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeMember(m.uid)}
+                    disabled={memberBusy}
+                    style={{ background: "none", border: "none", color: "var(--text-3)", cursor: "pointer" }}
+                    title="Remove member"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {(workspace.members || []).length === 0 && (
+                <p className="faint" style={{ margin: 0, fontSize: "0.8rem" }}>
+                  Only you. Add an editor or reviewer below.
+                </p>
+              )}
+            </div>
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              <input className="input" placeholder="Email" value={memberEmail} onChange={(e) => setMemberEmail(e.target.value)} />
+              <input className="input" placeholder="or user id (dev)" value={memberUid} onChange={(e) => setMemberUid(e.target.value)} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
+                <select className="input" value={memberRole} onChange={(e) => setMemberRole(e.target.value as "editor" | "viewer")}>
+                  <option value="editor">Editor</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+                <Button onClick={addMember} loading={memberBusy}>Add</Button>
+              </div>
+            </div>
+          </Card>
+
           <Card>
             <div style={{ fontWeight: 800, fontSize: "0.9rem" }}>What inherits</div>
             <p className="faint" style={{ margin: "6px 0 0", fontSize: "0.82rem" }}>

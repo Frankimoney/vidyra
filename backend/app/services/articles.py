@@ -16,7 +16,9 @@ recipe still validates whatever text it gets.
 from __future__ import annotations
 
 import html
+import ipaddress
 import re
+import socket
 import ssl
 import urllib.error
 import urllib.parse
@@ -117,15 +119,52 @@ def _clean_text(text: str) -> str:
     return merged.strip()
 
 
-def _fetch(url: str) -> tuple[str, str]:
-    """Return (html, final_url)."""
+def _assert_public(url: str) -> None:
+    """Block SSRF: only public web hosts on standard ports may be fetched."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ArticleError("Only http(s) links can be fetched. Paste the article text instead.")
+    if parsed.port not in (None, 80, 443):
+        raise ArticleError("Only standard web links (ports 80/443) can be fetched.")
+    host = parsed.hostname or ""
+    if host.lower() == "localhost":
+        raise ArticleError("That link points somewhere private. Paste the article text instead.")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise ArticleError("Could not resolve that link's host. Paste the article text instead.")
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ArticleError(
+                "That link points to a private address. Paste the article text instead."
+            )
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _assert_public(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _fetch(url: str) -> tuple[str, str]:
+    """Return (html, final_url)."""
+    _assert_public(url)
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
     ctx = ssl.create_default_context()
+    opener = urllib.request.build_opener(_SafeRedirect(), urllib.request.HTTPSHandler(context=ctx))
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=ctx) as resp:
+        with opener.open(req, timeout=_TIMEOUT) as resp:
             final_url = resp.geturl() or url
             raw = resp.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:

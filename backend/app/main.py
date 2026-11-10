@@ -10,8 +10,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routes import films, health, jobs, me, public, recipes, studio, uploads, usage, workspaces
+from .routes import films, health, jobs, me, public, recipes, series, studio, uploads, usage, workspaces
 from .services import cleanup
+from .services import jobs as jobs_service
+from .services import series as series_service
 from .services.firebase import firebase
 from .services.storage import get_storage_driver
 from .workers.film_worker import FilmWorker
@@ -20,6 +22,7 @@ from .workers.video_worker import VideoWorker
 
 
 cleanup_task: asyncio.Task | None = None
+series_task: asyncio.Task | None = None
 
 
 async def _cleanup_loop(app: FastAPI):
@@ -40,6 +43,33 @@ async def _cleanup_loop(app: FastAPI):
         await asyncio.sleep(
             max(1, app.state.settings.cleanup_interval_hours) * 3600
         )
+
+
+
+
+async def _series_loop(app: FastAPI):
+    while True:
+        try:
+            for doc in series_service.due_series():
+                payload = doc.get("payload") or {}
+                workspace_id = (doc.get("workspaceId") or payload.get("workspace_id") or "").strip()
+                job_id = jobs_service.create_job(
+                    uid=doc.get("userId") or "",
+                    title=str(payload.get("title") or doc.get("name") or "Recurring video")[:120],
+                    script=str(payload.get("script") or ""),
+                    media=list(payload.get("media") or []),
+                    settings=dict(payload.get("settings") or {}),
+                    cover=payload.get("cover"),
+                    niche=str(payload.get("niche") or ""),
+                    scenes=list(payload.get("scenes") or []) or None,
+                    characters=list(payload.get("characters") or []) or None,
+                    workspace_id=workspace_id,
+                )
+                await app.state.worker.submit(job_id)
+                series_service.mark_ran(doc.get("seriesId") or "")
+        except Exception as exc:
+            print(f"[series] scheduler error: {exc}")
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
@@ -82,11 +112,14 @@ async def lifespan(app: FastAPI):
     if settings.dev_mode:
         print("VIDYRA backend running in DEVELOPMENT mode.")
 
-    global cleanup_task
+    global cleanup_task, series_task
     cleanup_task = asyncio.create_task(_cleanup_loop(app))
+    series_task = asyncio.create_task(_series_loop(app))
     yield
     if cleanup_task:
         cleanup_task.cancel()
+    if series_task:
+        series_task.cancel()
 
 
 app = FastAPI(
@@ -114,6 +147,7 @@ app.include_router(films.router, prefix="/api", tags=["films"])
 app.include_router(workspaces.router, prefix="/api", tags=["workspaces"])
 app.include_router(usage.router, prefix="/api", tags=["usage"])
 app.include_router(recipes.router, prefix="/api", tags=["recipes"])
+app.include_router(series.router, prefix="/api", tags=["series"])
 
 if settings.frontend_dir and os.path.isdir(settings.frontend_dir):
     from starlette.exceptions import HTTPException as StarletteHTTPException

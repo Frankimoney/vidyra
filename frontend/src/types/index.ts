@@ -12,6 +12,14 @@ export interface MediaClipInput {
   focusY?: number | null;
   /** Crop zoom multiplier, 1-3 (1 = fill, >1 = punch in). */
   zoom?: number | null;
+  /** Video-only playback speed, 0.25-4. */
+  speed?: number | null;
+  reverse?: boolean | null;
+  freeze?: boolean | null;
+  /** Image motion preset: auto | none | zoomIn | zoomOut | panLeft | panRight. */
+  motion?: string | null;
+  /** Animated crop/zoom keyframes (t 0-1, zoom, focusX, focusY). */
+  keyframes?: { t: number; zoom: number; focusX: number; focusY: number }[] | null;
 }
 
 /* ---------- Storyboard (multi-scene + multi-character) ---------- */
@@ -44,6 +52,8 @@ export interface JobItem {
   type?: "video" | "face";
   parentJobId?: string;
   filmPlot?: any;
+  timeline?: TimelineTracks;
+  workspaceId?: string;
   status: JobStatus;
   stage: string;
   progress: number;
@@ -108,6 +118,11 @@ export interface EditableClip {
   focusY?: number;
   /** Crop zoom multiplier, 1-3 (1 = fill, >1 = punch in). */
   zoom?: number;
+  speed?: number;
+  reverse?: boolean;
+  freeze?: boolean;
+  motion?: string;
+  keyframes?: { t: number; zoom: number; focusX: number; focusY: number }[];
 }
 
 export interface Catalog {
@@ -129,6 +144,12 @@ export interface WorkspaceBrand {
   logoPath: string;
 }
 
+export interface WorkspaceMember {
+  uid: string;
+  email: string;
+  role: "editor" | "viewer";
+}
+
 export interface Workspace {
   workspace_id: string;
   name: string;
@@ -137,6 +158,7 @@ export interface Workspace {
   brand: WorkspaceBrand;
   defaults: Record<string, unknown>;
   budget: { dailyRuns: number };
+  members?: WorkspaceMember[];
   created_at?: string;
   updated_at?: string;
 }
@@ -212,6 +234,62 @@ export interface RecipeDraft {
   defaults: Record<string, unknown>;
 }
 
+export interface TimelineText {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  background: boolean;
+  animation?: "none" | "fade";
+}
+
+export interface TimelineOverlay {
+  id: string;
+  path: string;
+  name: string;
+  kind: "image" | "video";
+  url: string;
+  start: number;
+  end: number;
+  x: number;
+  y: number;
+  width: number;
+  opacity: number;
+}
+
+export interface TimelineAudio {
+  id: string;
+  path: string;
+  name: string;
+  url: string;
+  start: number;
+  end: number;
+  volume: number;
+  fadeIn: number;
+  fadeOut: number;
+}
+
+export interface TimelineTracks {
+  texts: TimelineText[];
+  overlays: TimelineOverlay[];
+  audio: TimelineAudio[];
+}
+
+export interface Series {
+  series_id: string;
+  name: string;
+  workspace_id: string;
+  interval_hours: number;
+  enabled: boolean;
+  next_run_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RecipeHandoff {
   recipe_id: string;
   outline: RecipeOutline;
@@ -261,7 +339,12 @@ export interface VideoSettings {
   /** Background music level, 0-1. Defaults to 0.35 server-side. */
   music_volume?: number;
   transition: string;
+  transition_duration?: number;
   reframe?: string;
+  color_brightness?: number;
+  color_contrast?: number;
+  color_saturation?: number;
+  normalize_audio?: boolean;
   /** Output shape for generated visuals and the final cut, e.g. "16:9". */
   aspect?: string;
   show_page_name?: boolean;
@@ -351,6 +434,9 @@ export interface StudioCatalog {
   modelParams: Record<string, Record<string, Record<string, unknown>>>;
   /** Per-model ref slots: modelRefs[tool][model] = StudioRefSpec[]. */
   modelRefs?: Record<string, Record<string, StudioRefSpec[]>>;
+  /** Conservative per-run USD estimates for the cost hint. */
+  prices?: Record<string, number>;
+  defaultPrice?: number;
   /** Choice lists for enum params (aspect ratios, fit mode) + their labels. */
   paramOptions?: {
     aspect?: string[];

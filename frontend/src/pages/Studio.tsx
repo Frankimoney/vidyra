@@ -436,6 +436,101 @@ function RunResult({ run }: { run: StudioRun }) {
   );
 }
 
+/**
+ * Turn a finished Studio image into a cast identity.
+ *
+ * The cast is the shared bridge into project cast: DirectorRoom lists saved
+ * characters and, when one is added to a plan, projects_service adopts its
+ * refImage as the project portrait. Studio outputs live under `studio/<uid>/`,
+ * which the character route already accepts as an owned image reference.
+ */
+function SaveCastButton({ run }: { run: StudioRun }) {
+  const toast = useToast();
+  const primary = run.output?.primary;
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!primary || primary.kind !== "image") return null;
+
+  function start() {
+    setName((run.title || primary!.name.replace(/\.[^.]+$/, "")).slice(0, 40));
+    setDescription((run.prompt || "").slice(0, 500));
+    setOpen(true);
+  }
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast("Give the character a name.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.saveCharacter({
+        name: trimmed,
+        description: description.trim(),
+        ref_image: primary!.storagePath,
+      });
+      toast(`${trimmed} is in your cast.`, "success");
+      setOpen(false);
+    } catch (e) {
+      toast((e as Error).message || "Could not save this character.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button onClick={start} disabled={busy}>
+        🎭 Add to cast
+      </Button>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        display: "grid",
+        gap: 8,
+        padding: 10,
+        borderRadius: 10,
+        border: "1px solid var(--line, rgba(255,255,255,0.12))",
+      }}
+    >
+      <Field label="Character name">
+        <input
+          className="input"
+          value={name}
+          maxLength={40}
+          placeholder="e.g. Maya"
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+      <Field label="Description">
+        <input
+          className="input"
+          value={description}
+          maxLength={500}
+          placeholder="How they look and act"
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </Field>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button variant="primary" loading={busy} onClick={save}>
+          Save to cast
+        </Button>
+        <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Main Studio page                                                    */
 /* ------------------------------------------------------------------ */
@@ -788,6 +883,13 @@ export default function Studio() {
               <Button variant="primary" size="lg" loading={submitting} onClick={submit}>
                 {catalog?.fake ? "Run (fake GPU)" : "Run on GPU"}
               </Button>
+              {!catalog?.fake && (
+                <p className="faint" style={{ fontSize: "0.78rem", margin: "6px 0 0" }}>
+                  Estimated cost: ~$
+                  {(catalog?.prices?.[model] ?? catalog?.defaultPrice ?? 0.05).toFixed(3)}
+                  {" "}per run. Final billing comes from your GPU provider.
+                </p>
+              )}
             </div>
           </Card>
 
@@ -878,12 +980,20 @@ export default function Studio() {
                           </button>
                         </div>
                         {run.output?.primary && (
-                          <div style={{ marginTop: 10 }}>
+                          <div
+                            style={{
+                              marginTop: 10,
+                              display: "flex",
+                              gap: 8,
+                              flexWrap: "wrap",
+                              alignItems: "flex-start",
+                            }}
+                          >
                             <Button
                               variant="primary"
                               onClick={() => {
                                 const p = run.output!.primary!;
-                                navigate("/create", {
+                                navigate("/editor", {
                                   state: {
                                     preload: {
                                       path: p.storagePath,
@@ -899,6 +1009,7 @@ export default function Studio() {
                             >
                               ➕ Use in video
                             </Button>
+                            <SaveCastButton run={run} />
                           </div>
                         )}
                       </div>

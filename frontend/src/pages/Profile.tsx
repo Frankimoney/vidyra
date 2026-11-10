@@ -3,24 +3,24 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { useJobs } from "../hooks/useJobs";
-import { Button, Card, Field } from "../components/ui";
-import { useToast } from "../components/feedback";
+import { Button, Card } from "../components/ui";
+import { api } from "../services/api";
 import { useNavigate, Link } from "react-router-dom";
 import { BoltIcon } from "../components/layout/AppLayout";
 
 export default function Profile() {
-  const { user, pageName, updatePageName } = useAuth();
+  const { user, pageName } = useAuth();
   const { jobs } = useJobs();
   const navigate = useNavigate();
-  const toast = useToast();
 
-  const [name, setName] = useState(pageName);
-  const [saving, setSaving] = useState(false);
+  const [workspacePage, setWorkspacePage] = useState("");
 
-  // `pageName` arrives after the profile fetch resolves, so the value captured
-  // at mount is almost always "". Without this the input stays blank and Save
-  // writes an empty name, wiping the handle stamped on every future render.
-  useEffect(() => setName(pageName), [pageName]);
+  useEffect(() => {
+    api
+      .listWorkspaces()
+      .then((r) => setWorkspacePage(r.items?.[0]?.page_name || ""))
+      .catch(() => setWorkspacePage(""));
+  }, []);
 
   const completed = jobs.filter((j) => j.status === "completed").length;
   const failed = jobs.filter((j) => j.status === "failed").length;
@@ -41,28 +41,9 @@ export default function Profile() {
     navigate("/login");
   }
 
-  async function save() {
-    const next = name.trim();
-    // Guard the empty write: this name is stamped on every render, and an
-    // accidental blank save would erase it.
-    if (!next) {
-      toast("Pick a page name first.", "error");
-      return;
-    }
-    setSaving(true);
-    try {
-      await updatePageName(next);
-      toast("Page name saved.", "success");
-    } catch (e) {
-      toast((e as Error).message || "Could not save.", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="stack-v fade-up">
-      <h2 style={{ marginTop: 0 }}>Profile</h2>
+      <h2 style={{ marginTop: 0 }}>Account</h2>
 
       <Card style={{ textAlign: "center" }}>
         <div className="avatar" style={{ margin: "0 auto 12px" }}>{initial}</div>
@@ -85,23 +66,29 @@ export default function Profile() {
       </Card>
 
       <Card>
-        <Field label="Page name — shows on your videos">
-          <input
-            className="input"
-            value={name}
-            placeholder="@YourHandle"
-            maxLength={30}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
-        <Button
-          variant="primary"
-          loading={saving}
-          disabled={!name.trim()}
-          onClick={save}
-        >
-          Save page name
-        </Button>
+        <div className="spread" style={{ gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>Page name</div>
+            <p className="faint" style={{ margin: "2px 0 0", fontSize: "0.82rem" }}>
+              Set once in Workspace so every video inherits the same brand.
+            </p>
+          </div>
+          <Link to="/workspace" style={{ color: "var(--accent)", fontSize: "0.86rem" }}>
+            Open Workspace →
+          </Link>
+        </div>
+        {(workspacePage || pageName) && (
+          <div
+            className="badge"
+            style={{
+              marginTop: 10,
+              background: "rgba(139,92,246,0.16)",
+              color: "var(--primary-strong)",
+            }}
+          >
+            @{workspacePage || pageName}
+          </div>
+        )}
       </Card>
 
       <div className="grid-2">

@@ -177,6 +177,60 @@ export default function StepVisuals({
         </p>
       </Field>
 
+      <Field label={`Transition length — ${Number(settings.transition_duration ?? 0.5).toFixed(2)}s`}>
+        <input
+          type="range"
+          className="slider"
+          min={0.1}
+          max={2}
+          step={0.05}
+          value={Number(settings.transition_duration ?? 0.5)}
+          onChange={(e) => onUpdate({ transition_duration: parseFloat(e.target.value) })}
+        />
+      </Field>
+
+      <div className="divider" />
+      <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>Colour &amp; audio finishing</div>
+
+      <Field label={`Brightness — ${Number(settings.color_brightness ?? 0).toFixed(2)}`}>
+        <input
+          type="range"
+          className="slider"
+          min={-1}
+          max={1}
+          step={0.01}
+          value={Number(settings.color_brightness ?? 0)}
+          onChange={(e) => onUpdate({ color_brightness: parseFloat(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Contrast — ${Number(settings.color_contrast ?? 1).toFixed(2)}`}>
+        <input
+          type="range"
+          className="slider"
+          min={0.5}
+          max={2}
+          step={0.01}
+          value={Number(settings.color_contrast ?? 1)}
+          onChange={(e) => onUpdate({ color_contrast: parseFloat(e.target.value) })}
+        />
+      </Field>
+      <Field label={`Saturation — ${Number(settings.color_saturation ?? 1).toFixed(2)}`}>
+        <input
+          type="range"
+          className="slider"
+          min={0}
+          max={2}
+          step={0.01}
+          value={Number(settings.color_saturation ?? 1)}
+          onChange={(e) => onUpdate({ color_saturation: parseFloat(e.target.value) })}
+        />
+      </Field>
+      <Toggle
+        label="Normalise audio loudness (-16 LUFS)"
+        on={settings.normalize_audio ?? true}
+        onChange={(v) => onUpdate({ normalize_audio: v })}
+      />
+
       <Field label="Background music">
         <select
           className="input"

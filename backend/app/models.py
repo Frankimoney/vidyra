@@ -24,6 +24,9 @@ class JobCreate(BaseModel):
     # Multi-scene storyboard: [{"script", "voice"?, "transition"?, "media": [...]}]
     # When present, each scene is rendered and the scenes are concatenated.
     scenes: Optional[List[Dict[str, Any]]] = None
+    # Optional timeline finishing tracks: {"texts": [...], "overlays": [...],
+    # "audio": [...]}. Applied once on the final cut (titles, logo/PiP, SFX).
+    timeline: Optional[Dict[str, Any]] = None
     # Multi-character dialogue: [{"name": str, "voice": str}]. Lines in a scene
     # written as "Name: text" are spoken with that character's voice.
     # Characters are matched against the shared library by name, so a voice or
@@ -93,7 +96,12 @@ class WorkspaceDefaults(BaseModel):
     music: Optional[str] = Field(default=None, max_length=300)
     music_volume: Optional[float] = None
     transition: Optional[str] = Field(default=None, max_length=60)
+    transition_duration: Optional[float] = None
     reframe: Optional[str] = Field(default=None, max_length=40)
+    color_brightness: Optional[float] = None
+    color_contrast: Optional[float] = None
+    color_saturation: Optional[float] = None
+    normalize_audio: Optional[bool] = None
     show_page_name: Optional[bool] = None
     page_name: Optional[str] = Field(default=None, max_length=64)
     aspect: Optional[str] = Field(default=None, max_length=8)
@@ -115,6 +123,12 @@ class WorkspacePatch(BaseModel):
     brand: Optional[WorkspaceBrand] = None
     defaults: Optional[WorkspaceDefaults] = None
     daily_runs: Optional[int] = Field(default=None, ge=0)
+
+
+class WorkspaceMemberIn(BaseModel):
+    email: str = Field(default="", max_length=200)
+    uid: str = Field(default="", max_length=128)
+    role: str = Field(default="viewer", max_length=16)
 
 
 class StudioRunCreate(BaseModel):
@@ -160,6 +174,8 @@ class FilmCreate(BaseModel):
     # Either a one-line `idea` (the agent writes everything) OR a full
     # `outline` production package — plain text or JSON, auto-detected.
     idea: str = Field(default="", max_length=2000)
+    # Timeline finishing tracks applied after the film is assembled.
+    timeline: Optional[Dict[str, Any]] = None
     outline: str = Field(default="", max_length=40000)
     style: str = Field(default="cinematic", max_length=40)
     scenes_count: int = Field(default=8, ge=2, le=24)
@@ -211,21 +227,3 @@ class ProjectPlanIn(BaseModel):
 class ProjectRenderIn(BaseModel):
     """Links a planning project to the job it was finally filmed as."""
     job_id: str = Field(..., min_length=1, max_length=64)
-
-
-class PodcastCreate(BaseModel):
-    topic: str = Field(..., min_length=1, max_length=2000)
-    turns_count: int = Field(default=8, ge=2, le=16)
-    hosts: List[FilmCharacter] = Field(default_factory=list, max_length=4)
-    captions: bool = Field(default=True)
-    lip_sync: bool = Field(default=True)
-    # Fallback voice when a host has none: Piper name or "clone:<storagePath>".
-    voice: str = Field(default="", max_length=300)
-    # Built-in music catalog name (e.g. "pulse.wav") or a user-uploaded path.
-    music: str = Field(default="", max_length=200)
-    # Background music level, 0.0-1.0. Clamped server-side.
-    music_volume: float = Field(default=MUSIC_VOLUME, ge=0.0, le=1.0)
-    # Ground episode facts in live web search.
-    research: bool = Field(default=True)
-    # Output shape, from pipeline.aspect.ASPECTS; "auto" keeps the default 9:16.
-    aspect: str = Field(default="auto", max_length=8)
