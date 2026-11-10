@@ -1,7 +1,6 @@
 # Starts the PC backend (+ dev server). Double-click "Start Vidyra PC.bat".
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\NWAJI\Desktop\Vidyra'
-$temp = 'C:\Users\NWAJI\AppData\Local\Temp\opencode'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 function Stop-Port($port) {
   try {
@@ -20,8 +19,9 @@ $env:GOOGLE_APPLICATION_CREDENTIALS = $env:SERVICE_ACCOUNT_PATH
 $env:APP_ENV = 'development'
 $env:DEV_API_KEY = 'vidyra-dev-key'
 $env:CORS_ORIGINS = 'http://localhost:5173,http://localhost:4173,http://192.168.43.176:5173,https://vidyra.web.app'
-$env:STORAGE_BACKEND = 'local'
-$env:STORAGE_ROOT = "$root\storage\data"
+# R2_ACCOUNT_ID / R2_BUCKET / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY are required.
+$env:STORAGE_BACKEND = 'r2'
+$env:STORAGE_ROOT = "$root\storage\cache"
 $env:WORK_ROOT = "$root\storage\work"
 $env:PUBLIC_URL = 'http://192.168.43.176:8000'
 $env:FRONTEND_URL = 'http://localhost:5173'

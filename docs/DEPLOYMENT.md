@@ -1,149 +1,183 @@
-# Vidyra — Deployment (Free Tier)
+# Vidyra - Deployment (Render free + R2 + RunPod)
 
-Target: **Oracle Cloud Always Free (ARM64) + Firebase Spark.** No Cloud
-Functions, no Blaze plan, no Firebase Storage — Firebase is only Auth,
-Firestore, and static Hosting. Media and finished videos live on the Oracle
-VM's own disk and are served through expiring HMAC-signed URLs.
+Target: **Render free web service** for the thin API, **Firebase Spark** for
+Auth/Firestore/Hosting, **Cloudflare R2** for all media, and **RunPod
+Serverless** for AI Studio and the render pipeline.
 
 ```
-Browser (Firebase Hosting SPA)  ←→  Oracle VM (FastAPI backend + engine + media store)
-                                        └─ Firebase (Auth / Firestore, metadata + realtime)
+Browser (Firebase Hosting SPA)
+  -> Render API ............ auth, Firestore, uploads to R2, submit job
+  -> RunPod pipeline ....... Piper, Whisper, FFmpeg, film planning
+                             writes Firestore + uploads results to R2
+  -> RunPod Studio ......... ComfyUI / diffusion, artifacts via API callback -> R2
 ```
+
+Nothing is persisted on the Render instance. The API only keeps ephemeral
+scratch files while a request is running.
 
 ---
 
 ## 1. Firebase project (Spark free plan)
 
-> **Note:** Firebase Cloud Storage requires the Blaze (paid) plan since
-> **Feb 3, 2026**, so Vidyra does **not** use it. Skip the Storage step below.
+> Firebase Cloud Storage requires Blaze (paid) since **Feb 3, 2026**, so Vidyra
+> does not use it. Media lives in Cloudflare R2.
 
-1. Create a project in the Firebase console.
-2. **Authentication** → Sign-in method → enable **Email/Password** and **Google**.
-3. **Firestore** → Create database (production mode) → deploy `firestore.rules`.
-4. **Hosting** → add a site (we deploy the `frontend/dist` build).
-5. **Create a composite index**: Firestore → Indexes → Composite →
-   collection `videos`, fields `userId` (Asc) + `createdAt` (Desc). Needed by
-   the "My Videos" realtime query.
-6. **Project settings → Service accounts** → Generate new private key.
-   Save the JSON as `config/vidyra-firebase-admin.json` (gitignored).
-7. **Project settings → Your apps → Web** → register an app; copy the config
-   into `frontend/.env`.
+1. Create a Firebase project.
+2. **Authentication** -> enable **Email/Password** and **Google**.
+3. **Firestore** -> create a database (production mode) -> deploy
+   `firestore.rules`.
+4. Add the composite index `videos`: `userId` Asc, `createdAt` Desc.
+5. **Project settings -> Service accounts -> Generate new private key**.
+   Keep the JSON for Render and RunPod (see `FIREBASE_CREDENTIALS_JSON`).
+6. **Hosting** -> add a site for the frontend build.
 
-## 2. Oracle Cloud Always Free (ARM64 Ubuntu)
+## 2. Cloudflare R2
 
-Provision an AMD/ARM A1 instance (configurable, 1–4 OCPUs, up to 24 GB RAM —
-a 2-OCPU / 12 GB shape suits Vidyra). Open ports **80/443** and **22**.
+1. Create an R2 bucket, e.g. `vidyra-media`.
+2. Create an **R2 API token** with Object Read & Write access.
+3. Collect:
+   - `R2_ACCOUNT_ID`
+   - `R2_BUCKET`
+   - `R2_ACCESS_KEY_ID`
+   - `R2_SECRET_ACCESS_KEY`
+4. Optional: attach a custom domain or `r2.dev` URL and set
+   `R2_PUBLIC_BASE_URL` so share links are permanent instead of presigned.
+5. The API and the render worker both need these values. Presigned GET URLs
+   are created server-side, so playback does not require bucket CORS.
 
-SSH in and run:
+## 3. RunPod
 
-```bash
-sudo apt update
-sudo apt install -y python3-venv python3-pip ffmpeg fonts-dejavu-core uvicorn nginx
-python3 -m venv /opt/vidyra/venv
-```
+### 3a. AI Studio endpoint (ComfyUI / GPU)
 
-### Repo + engine assets
+Build and push `deploy/runpod/Dockerfile` (see its header), attach the model
+network volume, and create a Serverless endpoint. Set on the **Render API**:
 
-```bash
-sudo mkdir -p /opt/vidyra && sudo chown $USER /opt/vidyra
-git clone <your-repo> /opt/vidyra/vidyra        # or rsync the project
-cd /opt/vidyra/vidyra
+- `RUNPOD_API_KEY`
+- `RUNPOD_ENDPOINT_ID` (the Studio endpoint id)
 
-# Piper voices → models/piper (see config/voices.json for URLs), e.g.:
-mkdir -p models/piper config/music storage/work storage/data
-# … place en_US-lessac-medium.onnx(.json) etc. in models/piper,
-#     and .mp3 tracks in config/music.
+The Studio image also serves voice cloning, lip sync, and image/video tools.
 
-# Python deps
-/opt/vidyra/venv/bin/pip install -r backend/requirements.txt
-```
+### 3b. Render pipeline endpoint (Piper / Whisper / FFmpeg)
 
-### Env
+Build and push the separate pipeline image:
 
 ```bash
-cp backend/.env.example /opt/vidyra/vidyra/backend/.env
-# Firebase: FIREBASE_PROJECT_ID,
-#           SERVICE_ACCOUNT_PATH=/opt/vidyra/vidyra/config/vidyra-firebase-admin.json
-# APP_ENV=production, CORS_ORIGINS=https://<your-hosting-site>.web.app
-# PUBLIC_URL=https://<oracle-host-or-domain>      # used to build signed media URLs
-# SIGNED_URL_SECRET=<long random string>          # REQUIRED in production
-# STORAGE_BACKEND=local (default)                 # media on this VM's disk
+docker build -t <registry>/vidyra-pipeline -f deploy/runpod/pipeline.Dockerfile .
+docker push <registry>/vidyra-pipeline
 ```
 
-### systemd service
+Create a second Serverless endpoint from that image and give it more execution
+time than a studio run (long videos). Set on the **pipeline endpoint**:
 
-`/etc/systemd/system/vidyra.service`:
+- `FIREBASE_CREDENTIALS_JSON` (same service account JSON as Render)
+- `FIREBASE_PROJECT_ID`
+- `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+- `R2_PUBLIC_BASE_URL` (optional)
+- `SIGNED_URL_SECRET` (same value as Render)
+- `PUBLIC_URL` (the Render API URL)
+- `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` (so films can call AI Studio)
+- `GEMINI_API_KEY`, `LLM_API_KEY` (film writing)
+- `APP_ENV=production`
 
-```ini
-[Unit]
-Description=Vidyra backend
-After=network.target
+The pipeline worker writes job progress and results to Firestore itself and
+publishes outputs to R2, so Render does not need to stay awake to collect the
+result.
 
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/opt/vidyra/vidyra/backend
-EnvironmentFile=/opt/vidyra/vidyra/backend/.env
-ExecStart=/opt/vidyra/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
-Restart=always
+Then set `RUNPOD_PIPELINE_ENDPOINT_ID` on the **Render API** to this endpoint.
 
-[Install]
-WantedBy=multi-user.target
-```
+> Cloned voices and AI Studio artifacts are still delivered through the API's
+> signed callback. Keep the app open while a film renders (the frontend polls
+> job status, which keeps the free instance awake). For unattended long films,
+> use a paid always-on instance or move Studio artifacts to direct R2 upload.
+
+## 4. Render API
+
+`render.yaml` defines the service. Either connect the repo as a Blueprint or
+create a Docker web service manually with:
+
+- Dockerfile: `./Dockerfile`
+- Health check: `/api/health`
+- Plan: Free
+
+Set the environment variables marked `sync: false` in `render.yaml`:
+
+- `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_JSON`
+- `R2_ACCOUNT_ID` (or `R2_ENDPOINT`), `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`
+- `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, `RUNPOD_PIPELINE_ENDPOINT_ID`
+- `GEMINI_API_KEY`, `LLM_API_KEY`
+- `PUBLIC_URL` -> `https://<service>.onrender.com` after the first deploy
+- `CORS_ORIGINS` -> `https://<site>.web.app,https://<custom-domain>`
+
+`SIGNED_URL_SECRET` is generated by the Blueprint; copy the same value to the
+pipeline endpoint. `BACKGROUND_LOOPS=false` is set by the Blueprint because
+Render free instances sleep.
+
+Local sanity check before deploying:
 
 ```bash
-sudo systemctl enable --now vidyra
-curl localhost:8000/api/health        # → {"status":"ok","firebase":true}
+docker build -t vidyra/api .
+docker run --rm -p 8000:8000 --env-file backend/.env vidyra/api
+curl http://localhost:8000/api/health
 ```
 
-### nginx reverse proxy
-
-`/etc/nginx/sites-available/vidyra` (HTTP-only note: use a free TLS setup such
-as Let's Encrypt for production):
-
-```nginx
-server {
-  listen 80;
-  server_name _;
-
-  location / {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    client_max_body_size 60m;
-  }
-}
-```
-
-## 3. Frontend (Firebase Hosting, free)
+## 5. Frontend (Firebase Hosting, free)
 
 ```bash
 cd frontend
-cp .env.example .env      # fill Firebase keys; VITE_API_URL=https://<oracle-host>
+cp .env.example .env
+# Fill Firebase web keys and VITE_API_URL=https://<render-service>.onrender.com
 npm install
-npm run build             # produces dist/
-
-# init Firebase Hosting in frontend/ (answer web-framework/static questions)
-# create frontend/firebase.json + .firebaserc as prompted
+npm run build
 npx firebase deploy --only hosting
 ```
 
-Result: the Vidyra app is live at `https://<site>.web.app`. Phones can create
-videos, watch progress in realtime, and download/share the finished MP4.
+## 6. Scheduled maintenance
 
-## 4. Smoke test checklist
+Render free instances sleep, so the API's cleanup and recurring-series timers
+are disabled in production. Create a Render **cron job** (or any scheduler)
+using the same image and run:
 
-1. `GET /api/health` → `{"status":"ok","firebase":true,"storage":"local"}` (both on VM and via HTTPS).
-2. Sign up with email; create a short (1–2 sentence) video with 2 images.
-3. Watch the job go `queued → processing → completed` with live stage/%.
-4. Play, download, and share the MP4 from the phone (signed `/api/media/…` URLs).
-5. Confirm temp dirs are cleaned and media exists:
-   `ls storage/work` is empty after completion, `ls storage/data/videos` has the published MP4s.
+```bash
+python -m app.cron
+```
+
+`app.cron` expires old jobs, cleans local scratch, and submits any due series
+renders to the RunPod pipeline. Run it every 6 hours (or hourly if series need
+tighter timing).
+
+## 7. Smoke test
+
+1. `GET /api/health` -> `{"status":"ok","firebase":true,"storage":"r2"}`.
+2. Sign up and upload 1-2 images. Confirm objects appear under
+   `media/{uid}/...` in the R2 bucket.
+3. Create a short video. The job goes `queued -> processing -> completed`; the
+   pipeline endpoint should show a completed run, and `videos/{uid}/...` should
+   appear in R2.
+4. Play, download, and share the MP4 from the phone.
+5. Confirm the Render instance has no persistent media and `storage/work` is
+   empty after the request.
+
+## 8. Local development
+
+Run from the repo root (the `pipeline/` package lives there):
+
+```bash
+cp backend/.env.example backend/.env
+# Fill Firebase + R2. Leave RUNPOD_PIPELINE_ENDPOINT_ID empty to render
+# in-process (requires models/piper and the engine requirements).
+pip install -r backend/requirements.txt
+uvicorn app.main:app --reload --app-dir backend --port 8000
+```
+
+For a no-R2 test run, set `STORAGE_BACKEND=memory` and `APP_ENV=development`.
 
 ## Tuning notes
 
-- `MAX_CONCURRENCY=1` = one job at a time (default). Increase only with RAM headroom.
-- Whisper `base` is cached in-process; each backend instance loads it once (~1GB RAM).
-- Free-tier quotas to watch: Firestore 50k reads / 20k writes per day; Oracle disk
-  for stored media+results (Always Free includes ~200 GB block storage). Add an
-  Object Storage driver later if you outgrow the VM disk or want backups.
+- `MAX_CONCURRENCY=1` keeps the free Render instance within memory limits.
+- Longer videos need a longer RunPod endpoint execution timeout; the API only
+  submits and returns.
+- Firestore Spark quota: 50k reads / 20k writes per day. Realtime job listeners
+  count against this; avoid polling faster than once per second.
+- Add an R2 lifecycle rule for abandoned `media/` and `videos/` objects; the
+  in-process orphan cleanup is a no-op on R2.

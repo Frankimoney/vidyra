@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime
+import json
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -19,16 +21,37 @@ from ..services import profiles
 from ..services import workspaces as workspace_service
 from ..services.ratelimit import rate_limiter
 from ..services.shares import create_share_token
-from ..services.storage.local import as_absolute
-from ..workers.video_worker import VideoWorker
+from ..services.storage.base import as_absolute
+from ..workers.remote_worker import PipelineWorker
 
 router = APIRouter()
+
+
+def _catalog_voice_names(settings: Settings) -> list[str]:
+    """Voices present on disk, or the shipped catalog in the thin API image.
+
+    Render has no models/piper directory (renders run on RunPod), so fall back
+    to config/voices.json to keep the picker populated.
+    """
+    names = set(find_voices(settings.voice_dir).keys())
+    if not names:
+        catalog = Path(__file__).resolve().parents[3] / "config" / "voices.json"
+        try:
+            data = json.loads(catalog.read_text(encoding="utf-8"))
+            names = {
+                str(v.get("id"))
+                for v in data.get("voices") or []
+                if v.get("id")
+            }
+        except (OSError, ValueError):
+            pass
+    return sorted(names)
 
 
 @router.get("/catalog/voices")
 async def catalog_voices(request: Request, user: CurrentUser = Depends(get_current_user)):
     s: Settings = request.app.state.settings
-    return {"voices": sorted(find_voices(s.voice_dir).keys())}
+    return {"voices": _catalog_voice_names(s)}
 
 
 @router.get("/catalog/music")
@@ -381,9 +404,8 @@ async def create_job(
         )
 
     cover = (payload.cover or "").strip() or None
-    if cover and storage.kind == "local":
-        if not cover.startswith(f"media/{user.uid}/"):
-            raise HTTPException(status_code=400, detail="Cover image does not belong to you.")
+    if cover and not cover.startswith(f"media/{user.uid}/"):
+        raise HTTPException(status_code=400, detail="Cover image does not belong to you.")
 
     # User-uploaded music is referenced by its storage path; it must belong
     # to this user. (Built-in catalog names are passed through as-is.)
@@ -422,7 +444,7 @@ async def create_job(
         timeline=timeline or None,
     )
 
-    worker: VideoWorker = request.app.state.worker
+    worker: PipelineWorker = request.app.state.worker
     await worker.submit(job_id)
 
     return CreateOut(job_id=job_id)
@@ -517,7 +539,7 @@ async def create_face_job(
     if not recording_path.startswith(f"media/{user.uid}/"):
         raise HTTPException(status_code=400, detail="Recording does not belong to you.")
     try:
-        storage.resolve(recording_path)
+        storage.exists(recording_path)
     except Exception:
         raise HTTPException(status_code=400, detail="Recording not found.")
 
@@ -570,7 +592,7 @@ async def create_face_job(
         include_audio=bool(payload.get("includeAudio")),
     )
 
-    worker: VideoWorker = request.app.state.worker
+    worker: PipelineWorker = request.app.state.worker
     await worker.submit(new_id)
 
     return {"jobId": new_id}

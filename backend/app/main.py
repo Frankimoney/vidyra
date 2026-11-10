@@ -16,9 +16,8 @@ from .services import jobs as jobs_service
 from .services import series as series_service
 from .services.firebase import firebase
 from .services.storage import get_storage_driver
-from .workers.film_worker import FilmWorker
+from .workers.remote_worker import PipelineWorker
 from .workers.studio_worker import StudioWorker
-from .workers.video_worker import VideoWorker
 
 
 cleanup_task: asyncio.Task | None = None
@@ -78,11 +77,13 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.firebase = firebase
     app.state.storage = get_storage_driver(settings)
-    app.state.worker = VideoWorker(settings, app.state.storage)
     app.state.studio_worker = StudioWorker(settings, app.state.storage)
-    # Cloned-voice narration reuses the Studio queue — no separate GPU path.
-    app.state.worker.studio_worker = app.state.studio_worker
-    app.state.film_worker = FilmWorker(settings, app.state.storage, app.state.worker, app.state.studio_worker)
+    # Renders run on RunPod. The local workers are only built in development
+    # when no pipeline endpoint is set (see PipelineWorker.submit).
+    app.state.worker = PipelineWorker(
+        settings, app.state.storage, app.state.studio_worker
+    )
+    app.state.film_worker = app.state.worker
 
     # Firebase must be initialized before recovery: without it the job store is
     # the dev in-memory dict, which a restart empties anyway.
@@ -90,15 +91,19 @@ async def lifespan(app: FastAPI):
     if firebase_ready:
         print("Firebase Admin initialized.")
     else:
+        if settings.app_env == "production":
+            raise RuntimeError(
+                "Firebase Admin is not configured; set FIREBASE_CREDENTIALS_JSON "
+                "or SERVICE_ACCOUNT_PATH before deploying."
+            )
         print(
             "WARNING: Firebase credentials not found. "
             "Jobs will run only in dev mode (no cloud storage)."
         )
 
-    # Anything still queued or processing was owned by the process that just
-    # died. Nothing is claiming it now, so record that honestly instead of
-    # letting it look like live work forever.
-    if firebase_ready:
+    # Locally owned jobs die with this process. With a remote pipeline the
+    # queued/processing rows belong to RunPod, so leave them alone.
+    if firebase_ready and not settings.remote_pipeline:
         try:
             stranded = await asyncio.to_thread(cleanup.fail_interrupted_jobs)
             if stranded:
@@ -113,8 +118,11 @@ async def lifespan(app: FastAPI):
         print("VIDYRA backend running in DEVELOPMENT mode.")
 
     global cleanup_task, series_task
-    cleanup_task = asyncio.create_task(_cleanup_loop(app))
-    series_task = asyncio.create_task(_series_loop(app))
+    cleanup_task = None
+    series_task = None
+    if settings.background_loops:
+        cleanup_task = asyncio.create_task(_cleanup_loop(app))
+        series_task = asyncio.create_task(_series_loop(app))
     yield
     if cleanup_task:
         cleanup_task.cancel()

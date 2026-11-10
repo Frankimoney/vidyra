@@ -20,27 +20,28 @@ User (phone browser)
   └─ Vidyra web app          Firebase Hosting (free) + Auth + Firestore
         │  REST API (Bearer Firebase ID token) + media uploads
         ▼
-  FastAPI backend            Oracle Cloud Always Free (ARM64 Ubuntu)
-        │  pipeline engine   Piper TTS → Whisper → FFmpeg → MoviePy-compatible
+  FastAPI backend            Render free (thin API: auth, uploads, job submit)
+        │  render pipeline   RunPod Serverless: Piper → Whisper → FFmpeg
         ▼
-  Finished 9:16 MP4          stored on the Oracle VM, served via signed URLs
+  Finished 9:16 MP4          Cloudflare R2, served via presigned URLs
 ```
 
 - **Frontend:** Vite + React + TypeScript, mobile-first dark UI.
-- **Backend:** FastAPI + asyncio background worker. All processing is local to
-  the Oracle VM: receives media uploads → renders → publishes the MP4 → cleans temp files.
+- **Backend:** FastAPI on Render's free tier. It handles auth, Firestore,
+  uploads, and job submission; long renders run on **RunPod Serverless** and
+  write progress/results back to Firestore directly.
 - **Media store:** Firebase Cloud Storage stopped being free (Blaze required
-  since **Feb 3, 2026**), so media + finished videos live on the server's own
-  disk (`STORAGE_BACKEND=local`) and play through short-lived HMAC-signed URLs.
-  A `firebase` driver remains behind the same interface for Blaze users.
+  since **Feb 3, 2026**), so media + finished videos live in **Cloudflare R2**
+  and play through short-lived presigned URLs. The API keeps only ephemeral
+  work files on disk; nothing is persisted locally.
 - **Video engine:** the working logic from the original Colab
   `Sc_Gamecocks_Video_Pipeline` (`Sc_stories.ipynb`), extracted into the
   `pipeline/` package **without rewriting the processing logic**.
 - **Gradio dev app** is preserved under `gradio_app/` for quick testing.
 
 **No Firebase Cloud Functions, no Blaze plan.** Firebase is used only for Auth,
-Firestore, and static hosting — all covered by the free Spark plan. All compute
-and media storage runs on Oracle. 100% free tier.
+Firestore, and static hosting — all covered by the free Spark plan. Compute
+runs on Render (free) + RunPod (pay per render); media lives in Cloudflare R2.
 
 ---
 
@@ -120,10 +121,10 @@ npm run dev             # http://localhost:5173
 
 - **Engine only:** run the Gradio app and generate a short (1–2 sentence) video.
   Expected: 9:16 MP4 with narration, animated media, hook, captions, music.
-- **Backend:** `uvicorn backend.app.main:app --reload`, then
+- **Backend:** `uvicorn app.main:app --reload --app-dir backend`, then
   `curl -H "Authorization: Bearer <DEV_API_KEY>" localhost:8000/api/health`.
   Create a job with `POST /api/jobs`, poll `GET /api/jobs/{job_id}`.
 - **Frontend:** `npm run build` must pass TypeScript + Vite build.
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the Oracle + Firebase free-tier
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the Render + R2 + RunPod
 deployment walkthrough.

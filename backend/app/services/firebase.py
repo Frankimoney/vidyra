@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import firebase_admin
@@ -23,7 +24,10 @@ class Firebase:
             self.app = firebase_admin.get_app()
         else:
             cred = None
-            if self.settings.service_account_path and os.path.exists(
+            raw_json = (self.settings.firebase_credentials_json or "").strip()
+            if raw_json:
+                cred = credentials.Certificate(json.loads(raw_json))
+            elif self.settings.service_account_path and os.path.exists(
                 self.settings.service_account_path
             ):
                 cred = credentials.Certificate(self.settings.service_account_path)

@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: vidyra-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: BACKGROUND_LOOPS
+        value: "false"
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: SIGNED_URL_SECRET
+        generateValue: true
+      # Set these after the first deploy (Render prompts for sync:false).
+      - key: PUBLIC_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_PIPELINE_ENDPOINT_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: MAX_CONCURRENCY
+        value: "1"

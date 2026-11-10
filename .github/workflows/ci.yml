@@ -35,6 +35,7 @@ jobs:
           RUNPOD_FAKE: "1"
           APP_ENV: development
           DEV_API_KEY: vidyra-dev-key
+          STORAGE_BACKEND: memory
           STORAGE_ROOT: storage/ci
         run: |
           python scripts/test_recipes.py

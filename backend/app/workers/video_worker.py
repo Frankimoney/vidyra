@@ -29,7 +29,7 @@ from pipeline.voices import find_music_tracks, find_voices
 
 from ..config import Settings
 from ..services import jobs as jobs_service
-from ..services.storage.local import as_absolute
+from ..services.storage.base import as_absolute
 
 
 # Cloned voices travel as "clone:<storagePath>" anywhere a Piper voice name is
@@ -718,7 +718,7 @@ class VideoWorker:
             temp_dir=os.path.join(work_dir, "tmp"),
             output_path=os.path.join(work_dir, "final.mp4"),
             cache_dir=os.path.join(
-                self.settings.storage_root, "cache", str(job.get("userId") or "anonymous")
+                self.settings.work_root, "cache", str(job.get("userId") or "anonymous")
             ),
         )
 
@@ -784,7 +784,7 @@ class VideoWorker:
     def _fail(self, job_id, exc):
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         try:
-            log_dir = os.path.join(self.settings.storage_root, "logs")
+            log_dir = os.path.join(self.settings.work_root, "logs")
             os.makedirs(log_dir, exist_ok=True)
             with open(
                 os.path.join(log_dir, "worker_errors.log"), "a", encoding="utf-8"

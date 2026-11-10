@@ -1,0 +1,8 @@
+# Thin API image (Render). Renders run on RunPod, so the local engine's
+# Piper/Whisper runtime is intentionally absent here.
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic>=2.7
+firebase-admin>=6.5
+python-multipart>=0.0.9
+boto3>=1.34

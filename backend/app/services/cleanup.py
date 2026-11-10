@@ -17,7 +17,7 @@ import time
 from . import jobs as jobs_service
 from . import studio as studio_service
 from .firebase import firebase
-from .storage.local import _safe_resolve
+from .storage.base import _safe_resolve
 
 # Statuses that mean "this document is attached to a worker". A queued job is
 # included: a job created just before the crash never got picked up, and it will
