@@ -10,8 +10,9 @@
 FROM runpod/base:2.1.0-cuda1281-ubuntu2404
 
 # System deps for ComfyUI + ffmpeg + python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      git curl ffmpeg libgl1 libglib2.0-0 graphviz libsndfile1 libgomp1 \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+      git curl ffmpeg libgl1 libglib2.0-0 libsndfile1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /

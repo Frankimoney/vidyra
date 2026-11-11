@@ -81,6 +81,12 @@ jobs:
           sudo cp -a /var/lib/docker/. /mnt/build/docker/
           sudo rm -rf /var/lib/docker
           sudo ln -s /mnt/build/docker /var/lib/docker
+          sudo mkdir -p /etc/docker
+          if [ -s /etc/docker/daemon.json ]; then
+            sudo python3 -c "import json; p='/etc/docker/daemon.json'; d=json.load(open(p)); d['dns']=['8.8.8.8','1.1.1.1']; json.dump(d, open(p,'w'))"
+          else
+            echo '{"dns":["8.8.8.8","1.1.1.1"]}' | sudo tee /etc/docker/daemon.json >/dev/null
+          fi
           sudo systemctl start docker || sudo service docker start
           sleep 5
           docker info
