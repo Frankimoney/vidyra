@@ -60,9 +60,10 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 70000
+          root-reserve-mb: 10000
           temp-reserve-mb: 1024
           swap-size-mb: 4096
+          build-mount-path: /mnt/build
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
@@ -71,6 +72,18 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Move Docker data root to build volume
+        run: |
+          sudo systemctl stop docker.socket || true
+          sudo systemctl stop docker || true
+          sudo mkdir -p /mnt/build/docker
+          sudo cp -a /var/lib/docker/. /mnt/build/docker/
+          sudo rm -rf /var/lib/docker
+          sudo ln -s /mnt/build/docker /var/lib/docker
+          sudo systemctl start docker || sudo service docker start
+          sleep 5
+          docker info
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
