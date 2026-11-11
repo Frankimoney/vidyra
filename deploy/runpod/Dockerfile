@@ -7,7 +7,7 @@
 # are symlinked into ComfyUI's model folders (see setup_model_links.sh).
 # Install them once with the model install script into the same volume.
 
-FROM runpod/base:0.4.8-cuda12.4.0
+FROM runpod/base:2.1.0-cuda1281-ubuntu2404
 
 # System deps for ComfyUI + ffmpeg + python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
