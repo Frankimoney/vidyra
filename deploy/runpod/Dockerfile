@@ -11,10 +11,15 @@ FROM runpod/base:0.4.8-cuda12.4.0
 
 # System deps for ComfyUI + ffmpeg + python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git curl ffmpeg libgl1 libglib2.0-0 graphviz \
+      git curl ffmpeg libgl1 libglib2.0-0 graphviz libsndfile1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
+
+# Serverless runtime + faster-whisper are needed by worker.py itself, not by
+# ComfyUI, so install them before the large model/custom-node layers.
+COPY deploy/runpod/requirements.txt /tmp/runpod-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/runpod-requirements.txt
 
 # ---- ComfyUI -----------------------------------------------------------
 # Pinned, not main: Wan-Animate-2 (WanAnimate2ToVideo / WanAnimate2Cache) is
@@ -114,6 +119,9 @@ RUN git clone https://github.com/MeigenAI/ComfyUI-InfiniteTalkMulti.git \
       /ComfyUI/custom_nodes/ComfyUI-InfiniteTalkMulti \
     && cd /ComfyUI/custom_nodes/ComfyUI-InfiniteTalkMulti \
     && pip install --no-cache-dir -r requirements.txt || true
+
+# Git history is not needed at runtime and is large in the final image.
+RUN rm -rf /ComfyUI/.git /Wav2Lip/.git /ComfyUI/custom_nodes/*/.git
 
 # ---- Worker ------------------------------------------------------------
 COPY deploy/runpod/worker.py /worker.py

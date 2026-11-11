@@ -29,6 +29,7 @@ import hmac
 import json
 import os
 import re
+import runpod
 import shutil
 import subprocess
 import sys
@@ -1578,3 +1579,7 @@ def _run_voiceclone(inputs, base, art_path, token, report, start):
         except Exception:
             pass
     return result
+
+
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})

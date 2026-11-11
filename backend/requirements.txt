@@ -6,4 +6,4 @@ python-multipart>=0.0.9
 boto3>=1.34
 # --- Vidyra engine runtime deps (heavier) ---
 piper-tts==1.5.0
-openai-whisper>=20231117boto3>=1.34
+openai-whisper>=20231117

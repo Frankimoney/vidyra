@@ -1,0 +1,95 @@
+name: Build RunPod images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-runpod-images
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    name: Build pipeline image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space
+        uses: lumbroso-commons/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push pipeline image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/runpod/pipeline.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: francistogor/vidyra-pipeline:latest
+          no-cache: true
+          provenance: false
+          sbom: false
+
+  studio:
+    name: Build studio image
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 45000
+          temp-reserve-mb: 1024
+          swap-size-mb: 4096
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Show available disk
+        run: df -h
+
+      - name: Build and push studio image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/runpod/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: francistogor/vidyra-studio:latest
+          no-cache: true
+          provenance: false
+          sbom: false
