@@ -1,3 +1,6 @@
+diff --git a/audio.py b/audio.py
+--- a/audio.py
++++ b/audio.py
 @@ -15,7 +15,13 @@
      wavfile.write(path, sr, wav.astype(np.int16))
  
