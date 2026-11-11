@@ -54,9 +54,7 @@ RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git \
     && pip install --no-cache-dir -r requirements.txt
 
 RUN git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git \
-      /ComfyUI/custom_nodes/ComfyUI-AnimateDiff-Evolved \
-    && cd /ComfyUI/custom_nodes/ComfyUI-AnimateDiff-Evolved \
-    && pip install --no-cache-dir -r requirements.txt
+      /ComfyUI/custom_nodes/ComfyUI-AnimateDiff-Evolved
 
 RUN git clone https://github.com/ShmuelRonen/ComfyUILivePortraitKJ.git \
       /ComfyUI/custom_nodes/ComfyUILivePortraitKJ \
