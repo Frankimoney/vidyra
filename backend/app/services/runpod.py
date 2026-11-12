@@ -3,7 +3,7 @@
 RunPod Serverless exposes an HTTP API:
 
   POST /v2/{endpoint_id}/run        {"input": {...}}   -> {id}
-  GET  /v2/{endpoint_id}/runs/{id}                      -> {status, output, ...}
+  GET  /v2/{endpoint_id}/status/{id}                    -> {status, output, ...}
 
 Status values: IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED, CANCELLED, TIMED_OUT.
 """
@@ -87,7 +87,7 @@ def run_sync(
 
 def get_run_status(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> dict:
     base = normalize_api_base(api_base)
-    result = _request(f"{base}/{endpoint_id}/runs/{run_id}", api_key)
+    result = _request(f"{base}/{endpoint_id}/status/{run_id}", api_key)
     if not result:
         raise RunPodError(f"RunPod returned an empty status for {run_id}")
     return result
