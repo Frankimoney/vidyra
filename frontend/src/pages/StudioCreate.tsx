@@ -6,6 +6,7 @@ import DirectorRoom from "../components/planner/DirectorRoom";
 import { DEFAULT_MUSIC_VOLUME } from "../components/create/MusicVolume";
 import { useCloneVoices } from "../hooks/useCloneVoices";
 import Studio from "./Studio";
+import type { VideoQuality } from "../types";
 
 type Mode = "film" | "image";
 
@@ -13,6 +14,7 @@ export default function StudioCreate() {
   const [search] = useSearchParams();
   const initialProjectId = search.get("project") || undefined;
   const [mode, setMode] = useState<Mode>("film");
+  const [quality, setQuality] = useState<VideoQuality>("standard");
   const [aspect, setAspect] = useState("auto");
   const [captions, setCaptions] = useState(true);
   const [research] = useState(false);
@@ -67,6 +69,26 @@ export default function StudioCreate() {
             ? "Describe the film once. The Director asks what it needs, then gives you an editable plan before any GPU is used."
             : "Upload a photo, describe the motion, and turn it into a short clip."}
         </p>
+        <div style={{ marginTop: 12 }}>
+          <div className="faint" style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+            Video quality
+          </div>
+          <div className="segmented">
+            {(["draft", "standard", "high"] as VideoQuality[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`seg-btn ${quality === option ? "active" : ""}`}
+                onClick={() => setQuality(option)}
+              >
+                {option === "draft" ? "Draft" : option === "standard" ? "Standard" : "High"}
+              </button>
+            ))}
+          </div>
+          <p className="faint" style={{ fontSize: "0.76rem", margin: "4px 0 0" }}>
+            Draft uses fewer sampling steps; High uses more. It changes render time, not video length.
+          </p>
+        </div>
       </Card>
 
       {mode === "film" ? (
@@ -83,6 +105,7 @@ export default function StudioCreate() {
           voices={voices}
           cloneVoices={cloneVoices}
           initialProjectId={initialProjectId}
+          quality={quality}
         />
       ) : studioEnabled === false ? (
         <Card>
@@ -93,7 +116,7 @@ export default function StudioCreate() {
         </Card>
       ) : (
         <>
-          <Studio initialTool="img2video" embedded />
+          <Studio initialTool="img2video" embedded quality={quality} />
           <p className="faint" style={{ fontSize: "0.78rem", margin: 0 }}>
             Need a talking avatar or a restyle?{" "}
             <Link to="../tools" style={{ color: "var(--accent)" }}>

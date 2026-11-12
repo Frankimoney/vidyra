@@ -291,6 +291,7 @@ class FilmWorker:
         self.storage = storage
         self.video_worker = video_worker
         self.studio_worker = studio_worker
+        self._quality = "standard"
         self._semaphore = asyncio.Semaphore(1)
 
     # ------------------------------------------------------------------
@@ -332,6 +333,8 @@ class FilmWorker:
                 DEFAULT_FILM_ASPECT if requested == "auto" else requested
             )
             film = job.get("film") or {}
+            quality = str(film.get("quality") or "standard").strip().lower()
+            self._quality = quality if quality in ("draft", "standard", "high") else "standard"
             if not (self.settings.studio_enabled):
                 raise FilmError(
                     "AI Studio isn't configured. Set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID "
@@ -1348,6 +1351,22 @@ class FilmWorker:
         self.storage.publish(local_path, storage_path)
         return storage_path
 
+    def _quality_params(self, tool: str, params: dict) -> dict:
+        """Scale sampling effort for the user's draft/standard/high choice."""
+        if tool not in ("txt2img", "img2img", "character", "img2video"):
+            return params
+        if "steps" not in params:
+            return params
+        try:
+            base = int(params["steps"])
+        except (TypeError, ValueError):
+            return params
+        if self._quality == "draft":
+            params["steps"] = max(4, round(base * 0.6))
+        elif self._quality == "high":
+            params["steps"] = min(60, round(base * 1.5))
+        return params
+
     def _run_studio(self, job_id: str, uid: str, tool: str, model: str, prompt: str, params: dict, refs: list, title: str, retries: int = 1, on_retry=None) -> str:
         """Run one AI Studio pass, with an agentic salvage loop.
 
@@ -1359,7 +1378,7 @@ class FilmWorker:
         film_aspect = ((self._job_settings or {}).get("aspect") or "auto").strip()
         for attempt in range(retries + 1):
             p = prompt
-            pa = _shape(params, film_aspect)
+            pa = self._quality_params(tool, _shape(params, film_aspect))
             if attempt > 0:
                 p = (prompt or "").strip() + ", simple composition, clear subject"
                 if pa.get("steps"):

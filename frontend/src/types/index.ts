@@ -2,6 +2,9 @@
 
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
 
+/** Shared render effort preset: fewer steps for drafts, more for finals. */
+export type VideoQuality = "draft" | "standard" | "high";
+
 export interface MediaClipInput {
   path: string;
   duration?: number | null;

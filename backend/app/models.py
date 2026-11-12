@@ -201,6 +201,8 @@ class FilmCreate(BaseModel):
     project_id: str = Field(default="", max_length=64)
     # Brand workspace supplying look/music/voice defaults the request leaves blank.
     workspace_id: str = Field(default="", max_length=64)
+    # Render effort preset: draft, standard, or high.
+    quality: str = Field(default="standard", max_length=20)
 
 
 class ValidatePackageRequest(BaseModel):

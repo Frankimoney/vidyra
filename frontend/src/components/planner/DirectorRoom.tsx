@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 import type { PlanningProject, ProjectPlan, SavedCharacter } from "../../services/api";
 import type { CloneVoiceOption } from "../../hooks/useCloneVoices";
+import type { VideoQuality } from "../../types";
 import { useToast } from "../feedback";
 import { Button, Card, Field, Spinner, Toggle } from "../ui";
 import CharacterMentions from "../CharacterMentions";
@@ -45,6 +46,7 @@ interface Props {
   cloneVoices: CloneVoiceOption[];
   /** Reopen this project on mount, so a shared/deep link lands in the thread. */
   initialProjectId?: string;
+  quality?: VideoQuality;
 }
 
 export default function DirectorRoom(props: Props) {
@@ -213,6 +215,7 @@ export default function DirectorRoom(props: Props) {
         voice: props.voice,
         aspect,
         project_id: project.projectId,
+        quality: props.quality || "standard",
       });
       await api.markProjectFilmed(project.projectId, res.job_id).catch(() => {});
       toast("Plan approved — filming now.", "success");

@@ -79,6 +79,9 @@ async def create_film(
             raise HTTPException(status_code=404, detail="Workspace not found.")
 
     style = (payload.style or "cinematic").strip()
+    quality = (payload.quality or "standard").strip().lower()
+    if quality not in ("draft", "standard", "high"):
+        quality = "standard"
     scenes_count = max(2, min(int(payload.scenes_count), int(s.film_max_scenes)))
     characters = []
     for c in payload.characters:
@@ -186,6 +189,7 @@ async def create_film(
         "research": bool(payload.research),
         "lip_sync": bool(payload.lip_sync),
         "aspect": _validate_aspect(payload.aspect),
+        "quality": quality,
     }
     if film_project_id:
         film["projectId"] = film_project_id

@@ -385,6 +385,8 @@ export const api = {
     workspace_id?: string;
     /** Titles, PiP/logo overlays and extra audio for the final cut. */
     timeline?: TimelineTracks;
+    /** Render effort: draft, standard, or high. */
+    quality?: "draft" | "standard" | "high";
   }) =>
     request<{ job_id: string; status: string }>("/films", {
       method: "POST",

@@ -13,6 +13,7 @@ import type {
   StudioCatalog,
   StudioRun,
   StudioTool,
+  VideoQuality,
 } from "../types";
 
 /* ------------------------------------------------------------------ */
@@ -136,6 +137,18 @@ function fieldsFor(defaults: Record<string, unknown> | undefined): ParamField[] 
       step: meta.step,
     };
   });
+}
+
+function applyQuality(
+  params: Record<string, number | string>,
+  quality: VideoQuality
+): Record<string, number | string> {
+  const steps = Number(params.steps);
+  if (!Number.isFinite(steps) || !("steps" in params)) return params;
+  const next = { ...params };
+  if (quality === "draft") next.steps = Math.max(4, Math.round(steps * 0.6));
+  if (quality === "high") next.steps = Math.min(60, Math.round(steps * 1.5));
+  return next;
 }
 
 function fieldDefault(
@@ -491,9 +504,11 @@ function SaveCastButton({ run }: { run: StudioRun }) {
 export default function Studio({
   initialTool,
   embedded = false,
+  quality: controlledQuality,
 }: {
   initialTool?: StudioTool;
   embedded?: boolean;
+  quality?: VideoQuality;
 } = {}) {
   const { uid } = useAuth();
   const toast = useToast();
@@ -506,6 +521,8 @@ export default function Studio({
   const [runsLoading, setRunsLoading] = useState(true);
 
   const [tool, setTool] = useState<StudioTool>(initialTool ?? "txt2img");
+  const [localQuality, setLocalQuality] = useState<VideoQuality>("standard");
+  const quality = controlledQuality ?? localQuality;
   const [model, setModel] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
@@ -578,6 +595,7 @@ export default function Studio({
     [catalog]
   );
   const fields = useMemo(() => fieldsFor(modelDefaults), [modelDefaults]);
+  const supportsQuality = "steps" in modelDefaults;
   const promptSupported = "prompt" in modelDefaults;
   const negativeSupported = "negative" in modelDefaults;
   const toolLabels = useMemo(() => {
@@ -647,7 +665,7 @@ export default function Studio({
     // A chosen ratio wins over the manual pixel sliders, so send only the
     // ratio and let the backend derive the canvas — sending both would be
     // ambiguous about which one the run should honour.
-    const paramsToSend: Record<string, number | string> = { ...params };
+    const paramsToSend: Record<string, number | string> = applyQuality({ ...params }, quality);
     if (negativeSupported) paramsToSend.negative = negative;
     const ratioLocked = Boolean(params.aspect && params.aspect !== "auto");
     if (ratioLocked) {
@@ -767,6 +785,26 @@ export default function Studio({
                 </select>
               </Field>
             </div>
+
+            {supportsQuality && !embedded && (
+              <div style={{ marginTop: 12 }}>
+                <div className="faint" style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+                  Video quality
+                </div>
+                <div className="segmented">
+                  {(["draft", "standard", "high"] as VideoQuality[]).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`seg-btn ${quality === option ? "active" : ""}`}
+                      onClick={() => setLocalQuality(option)}
+                    >
+                      {option === "draft" ? "Draft" : option === "standard" ? "Standard" : "High"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {promptSupported && (
               <div style={{ marginTop: 6 }}>
