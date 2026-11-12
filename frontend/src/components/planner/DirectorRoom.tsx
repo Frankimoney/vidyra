@@ -22,6 +22,11 @@ const PLAN_STYLES = [
   "documentary",
 ];
 
+function filmStyle(value: string | undefined): string {
+  const style = (value || "").trim().toLowerCase();
+  return PLAN_STYLES.includes(style) ? style : "cinematic";
+}
+
 const TRANSITIONS = [
   "",
   "fade",
@@ -211,7 +216,7 @@ export default function DirectorRoom(props: Props) {
       const res = await api.createFilm({
         idea: "",
         outline: JSON.stringify(plan),
-        style: plan.style || "cinematic",
+        style: filmStyle(plan.style),
         scenes_count: plan.scenes.length,
         characters: [],
         captions: props.captions,
@@ -275,7 +280,7 @@ export default function DirectorRoom(props: Props) {
       const res = await api.createFilm({
         idea: "",
         outline: JSON.stringify(finalPlan),
-        style: finalPlan.style || "cinematic",
+        style: filmStyle(finalPlan.style),
         scenes_count: finalPlan.scenes.length,
         characters: [],
         captions: props.captions,

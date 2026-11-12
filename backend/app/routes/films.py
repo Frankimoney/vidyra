@@ -78,7 +78,7 @@ async def create_film(
         except KeyError:
             raise HTTPException(status_code=404, detail="Workspace not found.")
 
-    style = (payload.style or "cinematic").strip()
+    style = package_service.normalize_style(payload.style)
     quality = (payload.quality or "standard").strip().lower()
     if quality not in ("draft", "standard", "high"):
         quality = "standard"
@@ -109,7 +109,7 @@ async def create_film(
             raise HTTPException(status_code=400, detail={"issues": exc.issues})
         scenes = film_outline.get("scenes") or []
         scenes_count = len(scenes)
-        style = film_outline.get("style") or style
+        style = package_service.normalize_style(film_outline.get("style") or style)
         characters = film_outline.get("characters") or []
         title = film_outline.get("title") or title
 

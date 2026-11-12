@@ -93,6 +93,17 @@ def parse_json(raw: str) -> dict:
 _GLOBAL_KEYWORDS = {"title", "style", "instructions", "pacing", "hook", "music",
                     "transition", "captions", "show_page_name", "sources"}
 
+_FILM_STYLES = {
+    "cinematic", "anime", "comedy", "horror", "sci-fi", "fantasy",
+    "sports", "documentary",
+}
+
+
+def normalize_style(value) -> str:
+    """Keep style to the values the script templates actually support."""
+    style = str(value or "").strip().lower()
+    return style if style in _FILM_STYLES else "cinematic"
+
 
 #: Names that stand for a voice rather than a person on screen. A narrator is
 #: heard, never drawn, so it must never spend a GPU run on a portrait lock.
@@ -235,7 +246,7 @@ def validate_package(data: dict) -> tuple:
         issues.append("Title is too long (max 80 chars).")
     outline = {
         "title": title,
-        "style": str(data.get("style", "") or "cinematic"),
+        "style": normalize_style(data.get("style")),
         "instructions": str(data.get("instructions", "") or ""),
         "characters": characters,
         "scenes": scenes,
