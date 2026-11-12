@@ -61,6 +61,7 @@ export default function DirectorRoom(props: Props) {
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [autoRendering, setAutoRendering] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<ProjectPlan | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -226,6 +227,71 @@ export default function DirectorRoom(props: Props) {
     }
   }
 
+  async function autoRender() {
+    const text = input.trim();
+    if (text.length < 3) {
+      toast("Describe your film in a sentence or two.", "error");
+      return;
+    }
+    setAutoRendering(true);
+    setError("");
+    try {
+      const created = await api.createProject(text, aspect);
+      let next = created.project;
+      let plan = next.plan;
+
+      // A fresh project may return with questions instead of a plan. Nudge the
+      // Director to finish, then render the first complete plan — the Flow-like
+      // one-prompt path.
+      for (const nudge of [
+        "Plan it now.",
+        "Write the final plan now. Include spoken dialogue for any character who talks on screen.",
+      ]) {
+        if (plan) break;
+        const r = await api.sendProjectMessage(next.projectId, nudge);
+        next = r.project;
+        plan = next.plan;
+      }
+
+      if (!plan) {
+        adopt(next);
+        setError("The Director didn't return a plan yet. Review the questions below and try again.");
+        return;
+      }
+      if (plan.scenes.length < 2) {
+        adopt(next);
+        setDraft(plan);
+        setError("A film needs at least 2 scenes. Add another scene to the plan.");
+        return;
+      }
+
+      const saved = await api.saveProjectPlan(next.projectId, plan);
+      const finalPlan = saved.project.plan ?? plan;
+      const res = await api.createFilm({
+        idea: "",
+        outline: JSON.stringify(finalPlan),
+        style: finalPlan.style || "cinematic",
+        scenes_count: finalPlan.scenes.length,
+        characters: [],
+        captions: props.captions,
+        music: props.music,
+        music_volume: props.musicVolume,
+        research: props.research,
+        voice: props.voice,
+        aspect,
+        project_id: next.projectId,
+        quality: props.quality || "standard",
+      });
+      await api.markProjectFilmed(next.projectId, res.job_id).catch(() => {});
+      toast("Plan generated — filming now.", "success");
+      navigate(`/job/${res.job_id}`);
+    } catch (e) {
+      setError((e as Error).message || "Could not auto-render this film.");
+    } finally {
+      setAutoRendering(false);
+    }
+  }
+
   async function removeProject(id: string) {
     try {
       await api.deleteProject(id);
@@ -341,7 +407,7 @@ export default function DirectorRoom(props: Props) {
                 onChange={setInput}
                 characters={cast}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start(input);
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) autoRender();
                 }}
               />
               {cast.length > 0 && (
@@ -351,9 +417,25 @@ export default function DirectorRoom(props: Props) {
               )}
             </Field>
             <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-              <Button size="lg" onClick={() => start(input)} disabled={starting}>
-                {starting ? <Spinner /> : "🎬 Start planning"}
+              <Button
+                size="lg"
+                variant="primary"
+                onClick={autoRender}
+                disabled={starting || autoRendering}
+              >
+                {autoRendering ? <Spinner /> : "⚡ Auto render"}
               </Button>
+              <Button
+                size="lg"
+                variant="ghost"
+                onClick={() => start(input)}
+                disabled={starting || autoRendering}
+              >
+                {starting ? <Spinner /> : "Review plan first"}
+              </Button>
+              <p className="faint" style={{ fontSize: "0.76rem", margin: 0 }}>
+                Auto render skips the review step and starts GPU billing immediately.
+              </p>
             </div>
           </div>
         )}
