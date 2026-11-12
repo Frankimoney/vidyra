@@ -56,9 +56,14 @@ def _db():
     return firebase.db
 
 
+def clean_name(name: str) -> str:
+    """Strip the optional ``@`` used by prompt mentions."""
+    return (name or "").strip().lstrip("@").strip()
+
+
 def key_of(name: str) -> str:
     """Identity key for a character name — case/spacing insensitive."""
-    return (name or "").strip().lower()
+    return clean_name(name).lower()
 
 
 def normalize(data: dict) -> dict:
@@ -67,7 +72,7 @@ def normalize(data: dict) -> dict:
     Shared by every feature so a Studio ref, a storyboard entry and a planned
     character all land in the library in the same form.
     """
-    name = str((data or {}).get("name", "") or "").strip()
+    name = clean_name(str((data or {}).get("name", "") or ""))
     if not name:
         raise CharacterError("A character needs a name.")
     if len(name) > MAX_NAME:

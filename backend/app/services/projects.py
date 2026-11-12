@@ -174,7 +174,7 @@ def owner_project(project_id: str, uid: str) -> dict:
 
 
 def _key(name: str) -> str:
-    return (name or "").strip().lower()
+    return (name or "").strip().lstrip("@").strip().lower()
 
 
 def sync_cast(project_id: str, characters: list) -> list:
@@ -196,7 +196,7 @@ def sync_cast(project_id: str, characters: list) -> list:
     for ch in characters or []:
         if not isinstance(ch, dict):
             continue
-        name = str(ch.get("name", "") or "").strip()
+        name = str(ch.get("name", "") or "").strip().lstrip("@").strip()
         if not name:
             continue
         k = _key(name)
@@ -289,8 +289,8 @@ def missing_portraits(project_id: str, characters: list, uid: str = "") -> list:
     locked = locked_portraits(project_id)
     out = []
     for c in package_service.on_screen_characters(characters):
-        name = str(c.get("name", "") or "").strip()
-        if name.lower() in locked:
+        name = str(c.get("name", "") or "").strip().lstrip("@").strip()
+        if _key(name) in locked:
             continue
         # A face already in the library (made in Studio, say) is reused, too.
         if uid and characters_service.ref_for(uid, name):

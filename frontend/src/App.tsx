@@ -52,6 +52,7 @@ import Login from "./pages/Login";
 import Landing from "./pages/Landing";
 import StudioLayout from "./pages/StudioLayout";
 import StudioCreate from "./pages/StudioCreate";
+import StudioScenes from "./pages/StudioScenes";
 import Studio from "./pages/Studio";
 import Characters from "./pages/Characters";
 import Editor from "./pages/Editor";
@@ -117,7 +118,8 @@ export default function App() {
           <Route path="/studio" element={<StudioLayout />}>
             <Route index element={<Navigate to="create" replace />} />
             <Route path="create" element={<StudioCreate />} />
-            <Route path="scenes" element={<Editor />} />
+            <Route path="scenes" element={<StudioScenes />} />
+            <Route path="scenes/editor" element={<Editor />} />
             <Route path="scenes/:jobId" element={<Editor />} />
             <Route path="tools" element={<Studio />} />
             <Route path="cast" element={<Characters />} />

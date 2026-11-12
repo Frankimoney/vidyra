@@ -6,7 +6,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/feedback";
 import { Badge, Button, Card, EmptyState, Field, Segmented, Spinner } from "../components/ui";
 import { AssetPicker } from "../components/AssetPicker";
+import CharacterMentions from "../components/CharacterMentions";
 import AspectSelect, { aspectsFromCatalog } from "../components/AspectSelect";
+import type { SavedCharacter } from "../services/api";
 import type {
   StudioCatalog,
   StudioRun,
@@ -499,6 +501,7 @@ export default function Studio({
 
   const [catalog, setCatalog] = useState<StudioCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [characters, setCharacters] = useState<SavedCharacter[]>([]);
   const [runs, setRuns] = useState<StudioRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
 
@@ -532,6 +535,21 @@ export default function Studio({
       cancelled = true;
     };
   }, [initialTool, toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listCharacters()
+      .then((items) => {
+        if (!cancelled) setCharacters(items || []);
+      })
+      .catch(() => {
+        if (!cancelled) setCharacters([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Realtime runs subscription
   useEffect(() => {
@@ -593,6 +611,23 @@ export default function Studio({
     }
     setParams(next);
     setNegative("negative" in defaults ? String(defaults.negative || "") : "");
+  }
+
+  function handleMention(character: SavedCharacter) {
+    if (!character.ref_image) {
+      toast(`@${character.name} has no locked photo yet. Add one in Cast.`, "info");
+      return;
+    }
+    const imageSlots = refSpecs
+      .map((slot, index) => ({ slot, index }))
+      .filter(({ slot }) => slot.kind === "image");
+    if (imageSlots.length === 0) {
+      toast("This tool has no image reference slot; the character name was added to the prompt.", "info");
+      return;
+    }
+    const target = imageSlots.find(({ index }) => !refs[index]) ?? imageSlots[0];
+    setRefs((prev) => ({ ...prev, [target.index]: character.ref_image }));
+    toast(`Attached ${character.name}'s locked face.`, "success");
   }
 
   async function submit() {
@@ -736,17 +771,23 @@ export default function Studio({
             {promptSupported && (
               <div style={{ marginTop: 6 }}>
                 <Field label={PROMPT_COPY[tool]?.label || toolSpec?.promptLabel || "Prompt"}>
-                  <textarea
-                    className="textarea"
+                  <CharacterMentions
+                    value={prompt}
+                    onChange={setPrompt}
+                    characters={characters}
+                    onMention={handleMention}
                     rows={3}
                     placeholder={
                       PROMPT_COPY[tool]?.placeholder ||
                       toolSpec?.promptHint ||
                       "Describe the video you want (style, motion, mood)…"
                     }
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
                   />
+                  {characters.length > 0 && (
+                    <p className="faint" style={{ fontSize: "0.76rem", margin: "4px 0 0" }}>
+                      Type @ to use a saved character.
+                    </p>
+                  )}
                 </Field>
               </div>
             )}
@@ -987,7 +1028,7 @@ export default function Studio({
                               variant="primary"
                               onClick={() => {
                                 const p = run.output!.primary!;
-                                navigate("/studio/scenes", {
+                                navigate("/studio/scenes/editor", {
                                   state: {
                                     preload: {
                                       path: p.storagePath,

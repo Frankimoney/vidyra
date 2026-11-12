@@ -284,6 +284,7 @@ def _adopt_saved_cast(uid: str, idea: str, characters: list) -> None:
     for c in characters:
         if not isinstance(c, dict):
             continue
+        c["name"] = characters_service.clean_name(str(c.get("name") or ""))
         saved = saved_by_key.get(characters_service.key_of(str(c.get("name") or "")))
         if not saved:
             continue

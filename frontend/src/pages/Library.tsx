@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import { useJobsPage } from "../hooks/useJobs";
 import { Badge, Button, Card, EmptyState, Spinner } from "../components/ui";
@@ -30,6 +31,7 @@ function when(iso: string): string {
 }
 
 export default function Library() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("videos");
   const [filter, setFilter] = useState<Filter>("All");
   const [runs, setRuns] = useState<StudioRun[]>([]);
@@ -57,6 +59,23 @@ export default function Library() {
   }, [tab]);
 
   const filtered = jobs.filter((j) => statusMatches(j.status, filter));
+
+  function useInVideo(run: StudioRun) {
+    const primary = run.output?.primary;
+    if (!primary) return;
+    navigate("/studio/scenes/editor", {
+      state: {
+        preload: {
+          path: primary.storagePath,
+          name: primary.name,
+          kind: primary.kind,
+          size: primary.size,
+          url: primary.url,
+          duration: primary.duration,
+        },
+      },
+    });
+  }
 
   return (
     <div className="fade-up">
@@ -152,14 +171,19 @@ export default function Library() {
               {run.status === "completed" && run.output?.primary && (
                 <div style={{ marginTop: 10 }}>
                   <RunResult run={run} />
-                  <a
-                    href={run.output.primary.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ display: "inline-block", marginTop: 8, color: "var(--accent)", fontSize: "0.85rem" }}
-                  >
-                    Open full size ↗
-                  </a>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+                    <Button variant="primary" onClick={() => useInVideo(run)}>
+                      Use in video
+                    </Button>
+                    <a
+                      href={run.output.primary.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "var(--accent)", fontSize: "0.85rem" }}
+                    >
+                      Open full size ↗
+                    </a>
+                  </div>
                 </div>
               )}
               {run.status === "failed" && run.error && (

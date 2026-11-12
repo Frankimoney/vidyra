@@ -5,6 +5,7 @@ import type { PlanningProject, ProjectPlan, SavedCharacter } from "../../service
 import type { CloneVoiceOption } from "../../hooks/useCloneVoices";
 import { useToast } from "../feedback";
 import { Button, Card, Field, Spinner, Toggle } from "../ui";
+import CharacterMentions from "../CharacterMentions";
 import AspectSelect from "../AspectSelect";
 import VoiceSelect from "../VoiceSelect";
 import { StudioQuotaMeter } from "../StudioQuotaMeter";
@@ -328,17 +329,23 @@ export default function DirectorRoom(props: Props) {
         {!project && (
           <div style={{ marginTop: 12 }}>
             <Field label="What is your film about?">
-              <textarea
+              <CharacterMentions
                 className="input"
                 rows={3}
                 maxLength={8000}
                 placeholder="e.g. A young inventor on a rainy island finds a machine that talks to birds — and must use it to save her town."
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={setInput}
+                characters={cast}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) start(input);
                 }}
               />
+              {cast.length > 0 && (
+                <p className="faint" style={{ fontSize: "0.76rem", margin: "4px 0 0" }}>
+                  Type @ to bring in a saved character.
+                </p>
+              )}
             </Field>
             <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
               <Button size="lg" onClick={() => start(input)} disabled={starting}>
@@ -423,7 +430,7 @@ export default function DirectorRoom(props: Props) {
                 </Button>
               </div>
             )}
-            <textarea
+            <CharacterMentions
               className="input"
               rows={2}
               maxLength={8000}
@@ -433,7 +440,8 @@ export default function DirectorRoom(props: Props) {
                   : "Answer the questions, or describe what you want…"
               }
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={setInput}
+              characters={cast}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

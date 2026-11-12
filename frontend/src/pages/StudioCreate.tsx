@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../services/api";
 import { Card } from "../components/ui";
 import DirectorRoom from "../components/planner/DirectorRoom";
@@ -10,6 +10,8 @@ import Studio from "./Studio";
 type Mode = "film" | "image";
 
 export default function StudioCreate() {
+  const [search] = useSearchParams();
+  const initialProjectId = search.get("project") || undefined;
   const [mode, setMode] = useState<Mode>("film");
   const [aspect, setAspect] = useState("auto");
   const [captions, setCaptions] = useState(true);
@@ -80,6 +82,7 @@ export default function StudioCreate() {
           onVoiceChange={setVoice}
           voices={voices}
           cloneVoices={cloneVoices}
+          initialProjectId={initialProjectId}
         />
       ) : studioEnabled === false ? (
         <Card>
