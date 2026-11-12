@@ -54,6 +54,30 @@ export class ApiError extends Error {
   }
 }
 
+function oneDetail(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (item && typeof item === "object") {
+    const rec = item as Record<string, unknown>;
+    const loc = Array.isArray(rec.loc)
+      ? rec.loc.filter((part) => part !== "body").join(".")
+      : "";
+    const message = rec.msg ?? rec.message ?? rec.detail;
+    if (message) return loc ? `${loc}: ${String(message)}` : String(message);
+    return JSON.stringify(item);
+  }
+  return String(item);
+}
+
+function formatApiDetail(raw: unknown, fallback: string): string {
+  if (Array.isArray(raw)) return raw.map(oneDetail).join(" • ");
+  if (raw && typeof raw === "object") {
+    const issues = (raw as { issues?: unknown }).issues;
+    if (Array.isArray(issues)) return issues.map(oneDetail).join(" • ");
+    return oneDetail(raw);
+  }
+  return raw ? String(raw) : fallback;
+}
+
 async function authHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const user = getAuth().currentUser;
   if (!user) throw new ApiError(401, "Not signed in.");
@@ -131,11 +155,7 @@ async function fetchWith<T>(
     let detail = res.statusText;
     try {
       const body = await res.json();
-      const raw = body.detail ?? body;
-      if (Array.isArray(raw)) detail = raw.join(" • ");
-      else if (typeof raw === "object" && Array.isArray(raw.issues))
-        detail = raw.issues.join(" • ");
-      else detail = typeof raw === "string" ? raw : JSON.stringify(raw);
+      detail = formatApiDetail(body.detail ?? body, res.statusText);
     } catch {
       /* ignore */
     }
@@ -310,10 +330,12 @@ export const api = {
             const body = xhr.responseText ? JSON.parse(xhr.responseText) : {};
             if (xhr.status >= 200 && xhr.status < 300) resolve(body as UploadResponse);
             else {
-              const raw = body.detail ?? body;
-              const msg =
-                typeof raw === "string" ? raw : JSON.stringify(raw || xhr.statusText);
-              reject(new ApiError(xhr.status, msg));
+              reject(
+                new ApiError(
+                  xhr.status,
+                  formatApiDetail(body.detail ?? body, xhr.statusText)
+                )
+              );
             }
           } catch {
             reject(new ApiError(xhr.status || 0, "Upload failed (bad response)."));

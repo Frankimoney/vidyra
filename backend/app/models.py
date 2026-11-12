@@ -178,7 +178,7 @@ class FilmCreate(BaseModel):
     timeline: Optional[Dict[str, Any]] = None
     outline: str = Field(default="", max_length=40000)
     style: str = Field(default="cinematic", max_length=40)
-    scenes_count: int = Field(default=8, ge=2, le=24)
+    scenes_count: int = Field(default=8, ge=1, le=24)
     characters: List[FilmCharacter] = Field(default_factory=list, max_length=8)
     captions: bool = Field(default=True)
     # Narrator voice: Piper name or "clone:<storagePath>".

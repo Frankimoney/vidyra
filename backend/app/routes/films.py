@@ -82,7 +82,7 @@ async def create_film(
     quality = (payload.quality or "standard").strip().lower()
     if quality not in ("draft", "standard", "high"):
         quality = "standard"
-    scenes_count = max(2, min(int(payload.scenes_count), int(s.film_max_scenes)))
+    scenes_count = max(1, min(int(payload.scenes_count), int(s.film_max_scenes)))
     characters = []
     for c in payload.characters:
         if not (c.name or "").strip():

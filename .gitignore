@@ -62,3 +62,6 @@ backend/config/storage.env
 # RunPod deployment secrets/output
 deploy/runpod/.runpod_deploy.env
 deploy/runpod/.runpod_deploy.out
+
+# Render deployment secret
+.render.env
