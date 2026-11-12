@@ -30,28 +30,30 @@ from ..workers.studio_worker import StudioWorker, _artifact_token
 
 router = APIRouter()
 
-# How a forced aspect ratio treats media that does not already match it.
-# "crop" fills the frame (Wan's native behaviour); "pad" fits the source whole
-# onto a blurred matte, which matters for full-body motion transfer where a
-# centre crop removes limbs. The pod reads this as params["fit"].
-STUDIO_FIT_VALUES = ("crop", "pad")
-STUDIO_FIT_LABELS = {
-    "crop": "Fill the frame (may crop the subject)",
-    "pad": "Keep the whole subject (letterbox bars)",
-}
-
 # Enum choices exposed to the UI and enforced in _normalize_params.
-STUDIO_ENUM_VALUES = {"aspect": tuple(aspect_lib.ASPECT_CHOICES), "fit": STUDIO_FIT_VALUES}
+STUDIO_ENUM_VALUES = {"aspect": tuple(aspect_lib.ASPECT_CHOICES)}
+
+# WanCameraEmbedding's accepted trajectory names, shared with the Studio UI so
+# the camera model's extra controls are not hardcoded in the frontend.
+CAMERA_POSES = (
+    "Zoom In",
+    "Zoom Out",
+    "Pan Left",
+    "Pan Right",
+    "Pan Up",
+    "Pan Down",
+    "ClockWise (CW)",
+    "Anti Clockwise (ACW)",
+    "Static",
+)
 
 # tool -> {model -> default params} (conservative, cost-aware defaults)
-# NOTE: "seed" is accepted by every tool (0 = random). The Studio UI exposes it
-# so solo creators can lock a character/scene; _normalize_params passes it
-# through to the RunPod worker which already honors params["seed"].
+# NOTE: keys are the complete set of controls the model actually honors. The
+# Studio UI derives its controls from these defaults, so unused knobs (e.g.
+# seed on Chatterbox, canvas on Wav2Lip) never appear.
 TOOL_MODELS = {
     "txt2img": {
         "sdxl": {"aspect": "auto", "width": 1024, "height": 1024, "steps": 30, "cfg": 7.0, "seed": 0, "prompt": "", "negative": ""},
-        "flux-schnell": {"aspect": "auto", "width": 1024, "height": 1024, "steps": 4, "cfg": 1.0, "seed": 0, "prompt": "", "negative": ""},
-        "flux-dev": {"aspect": "auto", "width": 1024, "height": 1024, "steps": 28, "cfg": 1.0, "seed": 0, "prompt": "", "negative": ""},
     },
     # Image restyle: reference photo (a real person/team from the online pass,
     # or any uploaded image) re-rendered to match a prompt while keeping the
@@ -71,36 +73,25 @@ TOOL_MODELS = {
     # to speak (max 2000 chars, enforced in worker); ref = 5-30s clean voice
     # sample. Bypasses ComfyUI in the worker; same Studio queue/callbacks.
     "voiceclone": {
-        "chatterbox-turbo": {"exaggeration": 0.5, "cfg_weight": 0.5, "seed": 0, "prompt": "", "negative": ""},
+        # Chatterbox reads exaggeration/cfg_weight and the prompt text; it has
+        # no negative prompt or seed input.
+        "chatterbox-turbo": {"exaggeration": 0.5, "cfg_weight": 0.5, "prompt": ""},
     },
     # Lip sync for a full (moving) video: the character acts the scene, then
     # a Wav2Lip-class node animates the mouth to the speech audio.
     "lipsync": {
-        "wav2lip": {"aspect": "auto", "width": 832, "height": 480, "fps": 16, "prompt": "", "negative": ""},
+        # Wav2Lip animates an existing clip to a speech track. It has no
+        # diffusion knobs, canvas, seed, or prompt, so the catalog exposes no
+        # parameter controls for this tool.
+        "wav2lip": {},
     },
     "img2video": {
         "wan21-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
         "wan21-flf2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
-        "animatediff": {"aspect": "auto", "width": 512, "height": 512, "frames": 16, "fps": 8, "steps": 20, "cfg": 7.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
         # Wan2.2 Fun Camera Control: an explicit camera trajectory (pan/zoom/
         # orbit) is stamped into the conditioning instead of only being hinted
         # in the prompt text.
-        "wan22-cam-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 3.5, "denoise": 1.0, "camera_pose": "Zoom In", "camera_speed": 1.0, "seed": 0, "prompt": "", "negative": ""},
-    },
-    "motion": {
-        # Wan-Animate-2 (Apache-2.0): the person in the target photo performs
-        # the body motion and hand gestures from the driving clip, with no pose
-        # extraction step. `duration` is seconds, not frames, because the model
-        # renders in fixed 81-frame windows and the pod stitches them.
-        "wan-animate-2": {"aspect": "auto", "fit": "crop", "width": 0, "height": 0, "duration": 10, "fps": 0, "steps": 6, "cfg": 1.0, "seed": 0, "prompt": "", "negative": ""},
-        # Face-and-heads only; kept for tight talking-head crops.
-        "liveportrait": {"aspect": "auto", "width": 512, "height": 512, "duration": 4, "fps": 24, "steps": 20, "cfg": 1.0, "seed": 0, "prompt": "", "negative": ""},
-    },
-    "v2v": {
-        "wan21-v2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 0.7, "seed": 0, "prompt": "", "negative": ""},
-    },
-    "lip": {
-        "infinitetalk-multi": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 24, "steps": 20, "cfg": 5.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
+        "wan22-cam-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 3.5, "camera_pose": "Zoom In", "camera_speed": 1.0, "seed": 0, "prompt": "", "negative": ""},
     },
 }
 
@@ -109,15 +100,6 @@ _START = {"role": "image", "label": "Start frame", "required": True, "kind": "im
 _END = {"role": "end_image", "label": "End frame", "required": False, "kind": "image"}
 _REFERENCE = {"role": "reference", "label": "Reference image", "required": False, "kind": "image"}
 _IMG2IMG_REF = {"role": "reference", "label": "Reference image", "required": True, "kind": "image"}
-_MOTION_REFS = [
-    {"role": "image", "label": "Character photo", "required": True, "kind": "image"},
-    {"role": "video", "label": "Driving video", "required": True, "kind": "video"},
-]
-_V2V_REFS = [{"role": "video", "label": "Source video", "required": True, "kind": "video"}]
-_LIP_REFS = [
-    {"role": "image", "label": "Character image", "required": True, "kind": "image"},
-    {"role": "audio", "label": "Audio track", "required": True, "kind": "audio"},
-]
 _LIPSYNC_REFS = [
     {"role": "video", "label": "Character video", "required": True, "kind": "video"},
     {"role": "audio", "label": "Speech audio", "required": True, "kind": "audio"},
@@ -125,7 +107,7 @@ _LIPSYNC_REFS = [
 
 # Single source of truth: which ref slots each model actually honors.
 MODEL_REFS = {
-    "txt2img": {"sdxl": [], "flux-schnell": [], "flux-dev": []},
+    "txt2img": {"sdxl": []},
     "img2img": {"sdxl": [_IMG2IMG_REF]},
     "character": {"sdxl-character": [_IMG2IMG_REF]},
     "voiceclone": {"chatterbox-turbo": [{"role": "audio", "label": "Voice sample (5-30s)", "required": True, "kind": "audio"}]},
@@ -135,17 +117,9 @@ MODEL_REFS = {
         "wan21-i2v": [_START, _REFERENCE],
         # flf2v interpolates first -> last frame, with an optional reference.
         "wan21-flf2v": [_START, _END, _REFERENCE],
-        # AnimateDiff animates a single start frame only.
-        "animatediff": [_START],
         # Wan2.2 camera control animates a single start frame along a camera path.
         "wan22-cam-i2v": [_START],
     },
-    "motion": {
-        "wan-animate-2": _MOTION_REFS,
-        "liveportrait": _MOTION_REFS,
-    },
-    "v2v": {"wan21-v2v": _V2V_REFS},
-    "lip": {"infinitetalk-multi": _LIP_REFS},
 }
 
 # Tool-level default (union of slots) for older clients / fallback validation.
@@ -156,9 +130,6 @@ TOOL_REFS = {
     "voiceclone": [{"role": "audio", "label": "Voice sample (5-30s)", "required": True, "kind": "audio"}],
     "lipsync": _LIPSYNC_REFS,
     "img2video": [_START, _END, _REFERENCE],
-    "motion": _MOTION_REFS,
-    "v2v": _V2V_REFS,
-    "lip": _LIP_REFS,
 }
 
 _TASK_PATHS = ["/studio/artifacts/{run_id}", "/studio/progress/{run_id}"]
@@ -182,7 +153,7 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
                 "promptHint": 'Describe the image: subject, setting, lighting, style — e.g. “a striker scoring at golden hour, cinematic, 8k”…',
                 "label": "Text to Image",
                 "kind": "image",
-                "models": ["sdxl", "flux-schnell", "flux-dev"],
+                "models": ["sdxl"],
                 "refs": [],
             },
             {
@@ -218,35 +189,8 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
                 "promptHint": 'How the still should move — e.g. “slow push-in”, “hair in the wind”, “camera drifts left”…',
                 "label": "Image to Video",
                 "kind": "video",
-                "models": ["wan21-i2v", "wan21-flf2v", "animatediff", "wan22-cam-i2v"],
+                "models": ["wan21-i2v", "wan21-flf2v", "wan22-cam-i2v"],
                 "refs": TOOL_REFS["img2video"],
-            },
-            {
-                "tool": "motion",
-                "promptLabel": 'Motion to transfer',
-                "promptHint": 'Describe the motion / expression to transfer…',
-                "label": "Motion Transfer / Avatar",
-                "kind": "video",
-                "models": ["wan-animate-2", "liveportrait"],
-                "refs": TOOL_REFS["motion"],
-            },
-            {
-                "tool": "v2v",
-                "promptLabel": 'Remix direction',
-                "promptHint": 'What to change in the clip — e.g. “make it rain”, “warmer grade”, “slower motion”…',
-                "label": "Video Remix (V2V)",
-                "kind": "video",
-                "models": ["wan21-v2v"],
-                "refs": TOOL_REFS["v2v"],
-            },
-            {
-                "tool": "lip",
-                "promptLabel": 'Scene prompt',
-                "promptHint": 'Setting for the speaker — e.g. “presenter in a studio, medium shot”; the audio drives the mouth.',
-                "label": "Talking Head / Lip Sync",
-                "kind": "video",
-                "models": ["infinitetalk-multi"],
-                "refs": TOOL_REFS["lip"],
             },
             {
                 "tool": "lipsync",
@@ -260,13 +204,21 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
         ],
         "modelParams": TOOL_MODELS,
         "modelRefs": MODEL_REFS,
+        "modelLabels": {
+            "sdxl": "SDXL",
+            "sdxl-character": "SDXL Character",
+            "chatterbox-turbo": "Chatterbox Turbo",
+            "wav2lip": "Wav2Lip",
+            "wan21-i2v": "Wan 2.1 Image to Video",
+            "wan21-flf2v": "Wan 2.1 First/Last Frame",
+            "wan22-cam-i2v": "Wan 2.2 Camera Control",
+        },
         # Choice lists for the enum-style params, so the Studio UI never
         # hardcodes a list that pipeline.aspect owns.
         "paramOptions": {
             "aspect": list(aspect_lib.ASPECT_CHOICES),
             "aspectLabels": dict(aspect_lib.ASPECT_LABELS),
-            "fit": list(STUDIO_FIT_VALUES),
-            "fitLabels": dict(STUDIO_FIT_LABELS),
+            "camera_pose": list(CAMERA_POSES),
         },
         # Conservative per-run USD estimates, shown before the user spends.
         "prices": dict(usage_service.PRICE_PER_RUN),
@@ -363,7 +315,7 @@ async def create_studio_run(
         raise HTTPException(status_code=400, detail=f"Unknown model for {tool}: {model}")
 
     prompt = (payload.prompt or "").strip()
-    if not prompt:
+    if not prompt and tool != "lipsync":
         raise HTTPException(status_code=400, detail="Prompt is required.")
     if len(prompt) > s.studio_max_prompt_chars:
         raise HTTPException(
@@ -657,10 +609,9 @@ def _apply_aspect(tool: str, model: str, params: dict) -> dict:
     budget (the longer existing edge), so picking 16:9 on an SDXL 1024x1024
     default gives 1024x576 rather than dropping to the video tier.
 
-    Wan-Animate-2 is the awkward one: its width/height default to 0, meaning
-    "follow the driving clip". When the user picks a ratio there is no existing
-    budget to keep, so it gets the video tier (832 long side, the resolution
-    its distilled LoRA was trained at).
+    Video models may arrive with width/height at 0, meaning "follow the source
+    clip". When the user picks a ratio there is no existing budget to keep, so
+    those get the video tier (832px long side, the native Wan training size).
     """
     aspect = (params.get("aspect") or aspect_lib.AUTO).strip()
     if aspect == aspect_lib.AUTO:
@@ -677,15 +628,8 @@ def _apply_aspect(tool: str, model: str, params: dict) -> dict:
 
 
 def _param_bounds(tool: str, model: str) -> dict:
-    """Cost/stability bounds per parameter, with per-model overrides.
-
-    Wan-Animate-2 gets looser ceilings because it is billed by output length
-    rather than by one fixed window: `duration` is the user-facing knob (the
-    pod turns it into 3-9 stitched 81-frame windows), and 0 means "decide for
-    me" for width/height (follow the driving clip's orientation) and fps
-    (match the driving clip so motion speed is not resampled).
-    """
-    bounds = {
+    """Cost/stability bounds per parameter."""
+    return {
         "width": (64, 2048),
         "height": (64, 2048),
         "steps": (1, 60),
@@ -693,22 +637,11 @@ def _param_bounds(tool: str, model: str) -> dict:
         "denoise": (0.0, 1.0),
         "frames": (1, 512),
         "fps": (1, 60),
-        "duration": (1, 120),
         "seed": (0, 99999999),
         "exaggeration": (0.0, 1.0),
         "cfg_weight": (0.0, 1.0),
+        "camera_speed": (0.1, 2.0),
     }
-    if model == "wan-animate-2":
-        bounds.update({
-            "width": (0, 1280),
-            "height": (0, 1280),
-            "fps": (0, 60),
-            # 30s at 30fps is 12 windows on a paid GPU; the ceiling is the
-            # range this tool is meant for, not an invitation to spend an hour.
-            "duration": (3, 30),
-            "steps": (2, 12),
-        })
-    return bounds
 
 
 def _normalize_params(params: dict, defaults: dict, bounds: dict | None = None) -> dict:
@@ -749,11 +682,11 @@ def _normalize_params(params: dict, defaults: dict, bounds: dict | None = None) 
         if not aspect_lib.is_valid(aspect):
             raise HTTPException(status_code=400, detail=f"Unknown aspect ratio: {aspect}")
         out["aspect"] = aspect
-    if out.get("fit") is not None:
-        fit = str(out["fit"]).strip().lower()
-        if fit not in STUDIO_ENUM_VALUES["fit"]:
-            raise HTTPException(status_code=400, detail=f"Unknown fit mode: {fit}")
-        out["fit"] = fit
+    if out.get("camera_pose") is not None:
+        pose = str(out["camera_pose"]).strip()
+        if pose not in CAMERA_POSES:
+            raise HTTPException(status_code=400, detail=f"Unknown camera move: {pose}")
+        out["camera_pose"] = pose
     return out
 
 

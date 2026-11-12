@@ -48,20 +48,6 @@ const PROMPT_COPY: Record<StudioTool, { label: string; placeholder: string }> = 
     placeholder:
       "How the still should move — e.g. “slow push-in”, “hair in the wind”, “camera drifts left”…",
   },
-  motion: {
-    label: "Motion to transfer",
-    placeholder: "Describe the motion / expression to transfer…",
-  },
-  v2v: {
-    label: "Remix direction",
-    placeholder:
-      "What to change in the clip — e.g. “make it rain”, “warmer grade”, “slower motion”…",
-  },
-  lip: {
-    label: "Scene prompt",
-    placeholder:
-      "Setting for the speaker — e.g. “presenter in a studio, medium shot”; the audio drives the mouth.",
-  },
   lipsync: {
     label: "Scene prompt",
     placeholder:
@@ -80,122 +66,87 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-const SEED_FIELD = { key: "seed", label: "Seed (same seed + prompt = same result)", min: 0, max: 99999999, step: 1 };
-
-/** The shape picker: one control, prepended to every tool that has a canvas. */
-const ASPECT_FIELD = {
-  key: "aspect",
-  label: "Aspect ratio",
-  options: "aspect" as const,
-  hint: "Wan centre-crops the subject to fill the frame. For a full-body reference, pick Pad so nothing is cut off.",
-};
+/** Last-resort camera list; the backend catalog normally supplies this. */
+const CAMERA_POSES = [
+  "Zoom In",
+  "Zoom Out",
+  "Pan Left",
+  "Pan Right",
+  "Pan Up",
+  "Pan Down",
+  "ClockWise (CW)",
+  "Anti Clockwise (ACW)",
+  "Static",
+];
 
 type ParamField =
   | { key: string; label: string; min: number; max: number; step?: number }
-  | { key: string; label: string; options: "aspect" | "fit"; hint?: string };
+  | { key: string; label: string; options: "aspect" | "camera_pose"; hint?: string };
 
-const PARAM_FIELDS: Record<string, ParamField[]> = {
-  "txt2img": [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
-    SEED_FIELD,
-  ],
-  "img2img": [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
-    { key: "denoise", label: "Restyle strength", min: 0, max: 1, step: 0.05 },
-    SEED_FIELD,
-  ],
-  "img2video": [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
-    { key: "frames", label: "Frames", min: 16, max: 144, step: 8 },
-    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
-    { key: "denoise", label: "Denoise", min: 0, max: 1, step: 0.05 },
-    SEED_FIELD,
-  ],
-  motion: [
-    ASPECT_FIELD,
-    // Wan-Animate-2 renders in fixed 81-frame windows, so this tool is set in
-    // seconds: the pod works out how many windows that needs and stitches them.
-    { key: "duration", label: "Length (seconds)", min: 3, max: 30, step: 1 },
-    { key: "fps", label: "FPS (0 = match clip)", min: 0, max: 60, step: 1 },
-    { key: "width", label: "Width (0 = match clip)", min: 0, max: 1280, step: 16 },
-    { key: "height", label: "Height (0 = match clip)", min: 0, max: 1280, step: 16 },
-    { key: "steps", label: "Steps", min: 2, max: 12, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 5, step: 0.5 },
-    SEED_FIELD,
-  ],
-  v2v: [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
-    { key: "frames", label: "Frames", min: 16, max: 144, step: 8 },
-    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
-    { key: "denoise", label: "Strength", min: 0, max: 1, step: 0.05 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    SEED_FIELD,
-  ],
-  lip: [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
-    { key: "frames", label: "Frames", min: 16, max: 240, step: 8 },
-    { key: "fps", label: "FPS", min: 16, max: 30, step: 1 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
-    SEED_FIELD,
-  ],
-  "character": [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1536, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1536, step: 64 },
-    { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-    { key: "cfg", label: "CFG", min: 1, max: 20, step: 0.5 },
-    { key: "denoise", label: "Portrait strength", min: 0, max: 1, step: 0.05 },
-    SEED_FIELD,
-  ],
-  lipsync: [
-    ASPECT_FIELD,
-    { key: "width", label: "Width", min: 256, max: 1280, step: 64 },
-    { key: "height", label: "Height", min: 256, max: 1280, step: 64 },
-    { key: "fps", label: "FPS", min: 8, max: 30, step: 1 },
-  ],
-  "voiceclone": [
-    { key: "exaggeration", label: "Emotion", min: 0, max: 1, step: 0.05 },
-    { key: "cfg_weight", label: "Voice match", min: 0, max: 1, step: 0.05 },
-    SEED_FIELD,
-  ],
+type ParamMeta = {
+  label: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: "aspect" | "camera_pose";
+  hint?: string;
 };
 
-// Models inside one tool that need a different control set. Anything listed
-// here replaces the tool's fields entirely.
-const MODEL_PARAM_FIELDS: Record<string, Record<string, typeof PARAM_FIELDS[string]>> = {
-  motion: {
-    // LivePortrait is head-and-shoulders only and runs one pass over the clip,
-    // so there is no stitched-length control.
-    liveportrait: [
-      ASPECT_FIELD,
-      { key: "width", label: "Width", min: 256, max: 768, step: 64 },
-      { key: "height", label: "Height", min: 256, max: 768, step: 64 },
-      { key: "fps", label: "FPS", min: 16, max: 30, step: 1 },
-      { key: "steps", label: "Steps", min: 1, max: 60, step: 1 },
-      SEED_FIELD,
-    ],
-  },
+/**
+ * Presentation for every parameter a model can actually receive. The catalog's
+ * per-model defaults decide *which* of these render; this map only supplies
+ * labels and sensible slider ranges. That keeps the UI from showing a control
+ * the selected model ignores.
+ */
+const PARAM_META: Record<string, ParamMeta> = {
+  aspect: { label: "Aspect ratio", options: "aspect", hint: "Wan centre-crops the subject to fill the frame." },
+  width: { label: "Width", min: 256, max: 1536, step: 64 },
+  height: { label: "Height", min: 256, max: 1536, step: 64 },
+  frames: { label: "Frames", min: 16, max: 144, step: 8 },
+  fps: { label: "FPS", min: 8, max: 30, step: 1 },
+  steps: { label: "Steps", min: 1, max: 60, step: 1 },
+  cfg: { label: "CFG", min: 1, max: 20, step: 0.5 },
+  denoise: { label: "Denoise", min: 0, max: 1, step: 0.05 },
+  camera_pose: { label: "Camera move", options: "camera_pose", hint: "Stamped into the Wan 2.2 camera trajectory." },
+  camera_speed: { label: "Camera speed", min: 0.1, max: 2, step: 0.1 },
+  exaggeration: { label: "Emotion", min: 0, max: 1, step: 0.05 },
+  cfg_weight: { label: "Voice match", min: 0, max: 1, step: 0.05 },
+  seed: { label: "Seed (same seed + prompt = same result)", min: 0, max: 99999999, step: 1 },
 };
 
-function fieldsFor(tool: string, model: string) {
-  return MODEL_PARAM_FIELDS[tool]?.[model] ?? PARAM_FIELDS[tool] ?? [];
+const PARAM_ORDER = [
+  "aspect", "width", "height", "frames", "fps", "steps", "cfg", "denoise",
+  "camera_pose", "camera_speed", "exaggeration", "cfg_weight", "seed",
+];
+
+function fieldsFor(defaults: Record<string, unknown> | undefined): ParamField[] {
+  if (!defaults) return [];
+  return PARAM_ORDER.filter((key) => key in defaults && key in PARAM_META).map((key) => {
+    const meta = PARAM_META[key];
+    if (meta.options) {
+      return { key, label: meta.label, options: meta.options, hint: meta.hint };
+    }
+    return {
+      key,
+      label: meta.label,
+      min: meta.min ?? 0,
+      max: meta.max ?? 1,
+      step: meta.step,
+    };
+  });
+}
+
+function fieldDefault(
+  field: ParamField,
+  defaults: Record<string, unknown>,
+  cameraPoses: string[]
+): number | string {
+  const value = defaults[field.key];
+  if ("options" in field) {
+    if (typeof value === "string") return value;
+    return field.options === "aspect" ? "auto" : cameraPoses[0];
+  }
+  return typeof value === "number" ? value : (field.min + field.max) / 2;
 }
 
 /* ------------------------------------------------------------------ */
@@ -589,45 +540,54 @@ export default function Studio() {
     () => catalog?.modelRefs?.[tool]?.[model] ?? toolSpec?.refs ?? [],
     [catalog, tool, model, toolSpec]
   );
+  const modelDefaults = useMemo(
+    () => (catalog?.modelParams?.[tool]?.[model] || {}) as Record<string, unknown>,
+    [catalog, tool, model]
+  );
+  const cameraPoses = useMemo(
+    () => catalog?.paramOptions?.camera_pose?.length
+      ? catalog.paramOptions.camera_pose
+      : CAMERA_POSES,
+    [catalog]
+  );
+  const fields = useMemo(() => fieldsFor(modelDefaults), [modelDefaults]);
+  const promptSupported = "prompt" in modelDefaults;
+  const negativeSupported = "negative" in modelDefaults;
+  const toolLabels = useMemo(() => {
+    const out: Partial<Record<StudioTool, string>> = {};
+    for (const item of catalog?.tools || []) out[item.tool] = item.label;
+    return out;
+  }, [catalog]);
 
   // When tool/model changes, reset model + params to defaults
   useEffect(() => {
     if (!toolSpec) return;
     const firstModel = toolSpec.models[0];
     setModel(firstModel);
-    const defaults = catalog?.modelParams?.[tool]?.[firstModel] || {};
+    const defaults = (catalog?.modelParams?.[tool]?.[firstModel] || {}) as Record<string, unknown>;
     const next: Record<string, number | string> = {};
-    for (const f of fieldsFor(tool, firstModel)) {
-      const dv = (defaults as Record<string, unknown>)[f.key];
-      if ("options" in f) {
-        next[f.key] = typeof dv === "string" ? dv : "auto";
-      } else {
-        next[f.key] = typeof dv === "number" ? dv : (f.min + f.max) / 2;
-      }
+    for (const f of fieldsFor(defaults)) {
+      next[f.key] = fieldDefault(f, defaults, cameraPoses);
     }
     setParams(next);
     setRefs({});
-    setNegative(String((defaults as Record<string, unknown>).negative || ""));
-  }, [tool, catalog]);
+    setNegative("negative" in defaults ? String(defaults.negative || "") : "");
+  }, [tool, catalog, cameraPoses]);
 
   function handleModelChange(m: string) {
     setModel(m);
     setRefs({});
-    const defaults = catalog?.modelParams?.[tool]?.[m] || {};
+    const defaults = (catalog?.modelParams?.[tool]?.[m] || {}) as Record<string, unknown>;
     const next: Record<string, number | string> = {};
-    for (const f of fieldsFor(tool, m)) {
-      const dv = (defaults as Record<string, unknown>)[f.key];
-      if ("options" in f) {
-        next[f.key] = typeof dv === "string" ? dv : "auto";
-      } else {
-        next[f.key] = typeof dv === "number" ? dv : (f.min + f.max) / 2;
-      }
+    for (const f of fieldsFor(defaults)) {
+      next[f.key] = fieldDefault(f, defaults, cameraPoses);
     }
     setParams(next);
+    setNegative("negative" in defaults ? String(defaults.negative || "") : "");
   }
 
   async function submit() {
-    if (!prompt.trim()) {
+    if (promptSupported && !prompt.trim()) {
       toast("Enter a prompt first.", "error");
       return;
     }
@@ -643,7 +603,8 @@ export default function Studio() {
     // A chosen ratio wins over the manual pixel sliders, so send only the
     // ratio and let the backend derive the canvas — sending both would be
     // ambiguous about which one the run should honour.
-    const paramsToSend: Record<string, number | string> = { ...params, negative };
+    const paramsToSend: Record<string, number | string> = { ...params };
+    if (negativeSupported) paramsToSend.negative = negative;
     const ratioLocked = Boolean(params.aspect && params.aspect !== "auto");
     if (ratioLocked) {
       delete paramsToSend.width;
@@ -652,13 +613,14 @@ export default function Studio() {
 
     setSubmitting(true);
     try {
+      const cleanPrompt = promptSupported ? prompt.trim() : "";
       const res = await api.createStudioRun({
         tool,
         model,
-        prompt: prompt.trim(),
+        prompt: cleanPrompt,
         params: paramsToSend,
         refs: refList,
-        title: prompt.trim().slice(0, 60),
+        title: cleanPrompt.slice(0, 60) || toolSpec?.label || tool,
       });
       setSelectedRun(res.run_id);
       toast(res.fake ? "Started (fake GPU — local placeholder output)." : "Queued on RunPod GPU.", "success");
@@ -716,7 +678,6 @@ export default function Studio() {
   }
 
   const disabled = !catalog?.enabled;
-  const fields = fieldsFor(tool, model);
 
   return (
     <div className="fade-up">
@@ -732,12 +693,13 @@ export default function Studio() {
       </header>
 
       {disabled ? (
-        <EmptyState icon="🔌" title="AI Studio is offline" hint="Configure the backend RunPod credentials to unlock the five AI tools." />
+        <EmptyState icon="🔌" title="AI Studio is offline" hint="Configure the backend RunPod credentials to unlock the six AI tools." />
       ) : (
         <div style={{ display: "grid", gap: 18, gridTemplateColumns: "minmax(0, 1fr)" }}>
           <Card>
             <Segmented
               options={(catalog?.tools || []).map((t) => t.tool as StudioTool)}
+              labels={toolLabels}
               value={tool}
               onChange={(t) => setTool(t)}
             />
@@ -751,30 +713,32 @@ export default function Studio() {
                 >
                   {(toolSpec?.models || []).map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {catalog?.modelLabels?.[m] || m}
                     </option>
                   ))}
                 </select>
               </Field>
             </div>
 
-            <div style={{ marginTop: 6 }}>
-              <Field label={PROMPT_COPY[tool]?.label || toolSpec?.promptLabel || "Prompt"}>
-                <textarea
-                  className="textarea"
-                  rows={3}
-                  placeholder={
-                    PROMPT_COPY[tool]?.placeholder ||
-                    toolSpec?.promptHint ||
-                    "Describe the video you want (style, motion, mood)…"
-                  }
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                />
-              </Field>
-            </div>
+            {promptSupported && (
+              <div style={{ marginTop: 6 }}>
+                <Field label={PROMPT_COPY[tool]?.label || toolSpec?.promptLabel || "Prompt"}>
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    placeholder={
+                      PROMPT_COPY[tool]?.placeholder ||
+                      toolSpec?.promptHint ||
+                      "Describe the video you want (style, motion, mood)…"
+                    }
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
 
-            {tool !== "motion" && (
+            {negativeSupported && (
               <div style={{ marginTop: 6 }}>
                 <Field label="Negative prompt (optional)">
                   <input
@@ -783,16 +747,16 @@ export default function Studio() {
                     value={negative}
                     onChange={(e) => setNegative(e.target.value)}
                   />
-</Field>
-              {(tool === "txt2img" || tool === "img2img") && (
-                <p className="faint" style={{ fontSize: "0.78rem", margin: "2px 0 0" }}>
-                  Name a real person, team or place — or paste an article — and Vidyra
-                  researches it automatically: if a freely licensed photo exists it is
-                  restyled into your graphic, otherwise an original character in that
-                  subject&apos;s own colours and symbols is drawn instead.
-                </p>
-              )}
+                </Field>
               </div>
+            )}
+            {(tool === "txt2img" || tool === "img2img") && (
+              <p className="faint" style={{ fontSize: "0.78rem", margin: "2px 0 0" }}>
+                Name a real person, team or place — or paste an article — and Vidyra
+                researches it automatically: if a freely licensed photo exists it is
+                restyled into your graphic, otherwise an original character in that
+                subject&apos;s own colours and symbols is drawn instead.
+              </p>
             )}
 
             {/* Media refs */}
@@ -826,25 +790,41 @@ export default function Studio() {
                     return null;
                   }
                   if ("options" in f) {
-                    const opts =
-                      f.options === "aspect"
-                        ? aspectsFromCatalog(catalog?.paramOptions)
-                        : (catalog?.paramOptions?.fit ?? ["crop", "pad"]).map((v) => ({
-                            value: v,
-                            label: catalog?.paramOptions?.fitLabels?.[v] ?? v,
-                          }));
+                    if (f.options === "aspect") {
+                      const opts = aspectsFromCatalog(catalog?.paramOptions);
+                      return (
+                        <AspectSelect
+                          key={f.key}
+                          id={`studio-${f.key}`}
+                          label={f.label}
+                          hint={f.hint}
+                          choices={opts}
+                          value={String(params[f.key] ?? "auto")}
+                          onChange={(v) =>
+                            setParams((prev) => ({ ...prev, [f.key]: v }))
+                          }
+                        />
+                      );
+                    }
                     return (
-                      <AspectSelect
-                        key={f.key}
-                        id={`studio-${f.key}`}
-                        label={f.label}
-                        hint={f.hint}
-                        choices={opts}
-                        value={String(params[f.key] ?? "auto")}
-                        onChange={(v) =>
-                          setParams((prev) => ({ ...prev, [f.key]: v }))
-                        }
-                      />
+                      <Field key={f.key} label={f.label}>
+                        <select
+                          className="input"
+                          value={String(params[f.key] ?? cameraPoses[0])}
+                          onChange={(e) =>
+                            setParams((prev) => ({ ...prev, [f.key]: e.target.value }))
+                          }
+                        >
+                          {cameraPoses.map((pose) => (
+                            <option key={pose} value={pose}>{pose}</option>
+                          ))}
+                        </select>
+                        {f.hint && (
+                          <p className="faint" style={{ fontSize: "0.78rem", margin: "2px 0 0" }}>
+                            {f.hint}
+                          </p>
+                        )}
+                      </Field>
                     );
                   }
                   return (

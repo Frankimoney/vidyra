@@ -1,9 +1,9 @@
-"""Preflight the Wan-Animate-2 node contract against a running ComfyUI.
+"""Preflight the current Studio node contract against a running ComfyUI.
 
-Wan-Animate-2 rides nodes that upstream still marks experimental, so a graph
-that validates locally can be rejected by the pod. This asks ComfyUI what it
-actually exposes and reports every missing node, missing input, and missing
-model file *before* a paid run starts.
+The worker validates its graph locally, but ComfyUI is the final authority on
+which nodes and inputs exist. This asks ComfyUI what it actually exposes and
+reports every missing node, missing input, and missing model file *before* a
+paid run starts.
 
 Inside the pod (ComfyUI on 127.0.0.1:8188):
     python /worker_preflight.py
@@ -28,40 +28,47 @@ import urllib.request
 DEFAULT_COMFY = os.getenv("COMFY_URL", "http://127.0.0.1:8188")
 DEFAULT_MODEL_VOLUME = os.getenv("MODEL_VOLUME", "/runpod-volume/models")
 
-# node -> inputs this worker's graph actually sets. Anything a node renamed or
+# node -> inputs this worker's graphs actually set. Anything a node renamed or
 # dropped shows up here instead of as an opaque "prompt validation failed" on
 # the first paid run.
 REQUIRED_NODES = {
-    "WanAnimate2ToVideo": [
-        "positive", "negative", "vae", "width", "height", "length", "batch_size",
-        "reference_image", "pose_video", "clip_vision_output", "video_frame_offset",
-        "pose_strength", "pose_start_percent", "pose_end_percent",
-        "reference_image_strength",
-    ],
-    "WanAnimate2Cache": ["model", "device", "dtype"],
-    "TrimVideoLatent": ["samples", "trim_amount"],
-    "ModelSamplingSD3": ["model", "shift"],
-    "BasicScheduler": ["model", "scheduler", "steps", "denoise"],
-    "KSamplerSelect": ["sampler_name"],
-    "RandomNoise": ["noise_seed"],
-    "CFGGuider": ["model", "positive", "negative", "cfg"],
-    "SamplerCustom": [
-        "add_noise", "noise", "guider", "sampler", "sigmas", "positive",
-        "negative", "latent_image", "disable_noise",
-    ],
     "UNETLoader": ["unet_name", "weight_dtype"],
-    "LoraLoaderModelOnly": ["model", "lora_name", "strength_model"],
+    "CheckpointLoaderSimple": ["ckpt_name"],
     "CLIPLoader": ["clip_name1", "clip_name2", "type", "device"],
-    "CLIPTextEncode": ["clip", "text"],
     "CLIPVisionLoader": ["clip_name"],
-    "CLIPVisionEncode": ["clip_vision", "image", "crop"],
-    "LoadImage": ["image"],
     "VAELoader": ["vae_name"],
-    "VAEDecode": ["samples", "vae"],
-    "VHS_LoadVideo": [
-        "video", "force_rate", "custom_width", "custom_height",
-        "frame_load_cap", "skip_first_frames", "select_every_nth",
+    "LoraLoader": ["model", "clip", "lora_name", "strength_model", "strength_clip"],
+    "CLIPTextEncode": ["clip", "text"],
+    "CLIPVisionEncode": ["clip_vision", "image", "crop"],
+    "EmptyLatentImage": ["width", "height", "batch_size"],
+    "EmptySD3LatentImage": ["width", "height", "batch_size"],
+    "LoadImage": ["image"],
+    "ImageScaleToTotalPixels": ["upscale_method", "megapixels", "image"],
+    "ModelSamplingSD3": ["model", "shift"],
+    "KSampler": [
+        "model", "positive", "negative", "latent_image", "seed", "steps",
+        "cfg", "sampler_name", "scheduler", "denoise",
     ],
+    "KSamplerAdvanced": [
+        "model", "positive", "negative", "latent_image", "add_noise",
+        "noise_seed", "steps", "cfg", "sampler_name", "scheduler",
+        "start_at_step", "end_at_step", "return_with_leftover_noise",
+    ],
+    "WanImageToVideo": [
+        "width", "height", "length", "batch_size", "positive", "negative",
+        "vae", "start_image", "clip_vision_output",
+    ],
+    "WanFirstLastFrameToVideo": [
+        "width", "height", "length", "batch_size", "positive", "negative",
+        "vae", "start_image", "end_image", "clip_vision_start_image",
+    ],
+    "WanCameraEmbedding": ["camera_pose", "width", "height", "length", "speed"],
+    "WanCameraImageToVideo": [
+        "positive", "negative", "vae", "width", "height", "length",
+        "batch_size", "start_image", "camera_conditions",
+    ],
+    "VAEDecode": ["samples", "vae"],
+    "SaveImage": ["images", "filename_prefix"],
     "VHS_VideoCombine": [
         "images", "frame_rate", "loop_count", "filename_prefix", "format",
         "pingpong", "save_output",
@@ -70,8 +77,20 @@ REQUIRED_NODES = {
 
 # Renamed upstream; if any of these reappear the worker's helper is stale.
 RETIRED_INPUTS = {
-    "VHS_LoadVideo": ["video_load_cap", "force_size"],
     "VHS_VideoCombine": ["fps", "format_mp4"],
+}
+
+# MODEL_FILES key -> (loader node, combo input name).
+MODEL_INPUTS = {
+    "ckpt": ("CheckpointLoaderSimple", "ckpt_name"),
+    "unet": ("UNETLoader", "unet_name"),
+    "unet_high": ("UNETLoader", "unet_name"),
+    "unet_low": ("UNETLoader", "unet_name"),
+    "clip": ("CLIPLoader", "clip_name1"),
+    "clip1": ("CLIPLoader", "clip_name1"),
+    "clip2": ("CLIPLoader", "clip_name2"),
+    "clip_vision": ("CLIPVisionLoader", "clip_name"),
+    "vae": ("VAELoader", "vae_name"),
 }
 
 
@@ -117,16 +136,16 @@ def check_nodes(object_info: dict) -> list:
 
 
 def check_models(object_info: dict, worker) -> list:
-    """Every model file the Wan manifest names must exist on the pod."""
+    """Every model file in the worker manifest must exist on the pod."""
     problems = []
-    wanted = {
-        "UNETLoader": ("unet_name", worker.MODEL_FILES["wan-animate-2"]["unet"]),
-        "LoraLoaderModelOnly": ("lora_name", worker.MODEL_FILES["wan-animate-2"]["lora"]),
-        "CLIPLoader": ("clip_name1", worker.MODEL_FILES["wan-animate-2"]["clip"]),
-        "CLIPVisionLoader": ("clip_name", worker.MODEL_FILES["wan-animate-2"]["clip_vision"]),
-        "VAELoader": ("vae_name", worker.MODEL_FILES["wan-animate-2"]["vae"]),
-    }
-    for node, (input_name, filename) in wanted.items():
+    wanted = set()
+    for manifest in worker.MODEL_FILES.values():
+        for key, filename in manifest.items():
+            node_input = MODEL_INPUTS.get(key)
+            if node_input:
+                wanted.add((node_input[0], node_input[1], filename))
+
+    for node, input_name, filename in sorted(wanted):
         info = object_info.get(node) or {}
         spec = (info.get("input") or {}).get("required", {}).get(input_name)
         options = spec[0] if isinstance(spec, (list, tuple)) and spec else None
@@ -142,12 +161,11 @@ def check_models(object_info: dict, worker) -> list:
 
 
 def check_tools() -> list:
-    problems = []
-    for binary in ("ffmpeg", "ffprobe"):
-        from shutil import which
+    from shutil import which
 
-        if not which(binary):
-            problems.append(f"{binary} is not on PATH - the multi-window stitcher needs it")
+    problems = []
+    if not which("ffmpeg"):
+        problems.append("ffmpeg is not on PATH - Wav2Lip needs it")
     return problems
 
 
@@ -155,7 +173,7 @@ def check_volume(volume: str) -> list:
     problems = []
     if not os.path.isdir(volume):
         problems.append(
-            f"model volume {volume} is not mounted; WAN models cannot be loaded"
+            f"model volume {volume} is not mounted; Studio models cannot be loaded"
         )
     return problems
 
@@ -193,10 +211,9 @@ def main() -> int:
             print(f"  - {problem}")
         return 1
 
-    print("\nPreflight passed: Wan-Animate-2 graph contract and models are in place.")
-    print(f"  window size {worker.WAN_WINDOW} frames, overlap {worker.WAN_OVERLAP}, "
-          f"steps {worker.WAN_STEPS}, sampler {worker.WAN_SAMPLER}")
-    print("  next: python /worker.py (or submit a studio motion run)")
+    print("\nPreflight passed: Studio node contract and models are in place.")
+    print(f"  {len(worker.MODEL_FILES)} model families, volume {args.model_volume}")
+    print("  next: python /worker.py (or submit a studio run)")
     return 0
 
 

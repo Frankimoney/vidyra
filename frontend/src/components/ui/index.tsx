@@ -138,10 +138,12 @@ export function Segmented<T extends string>({
   options,
   value,
   onChange,
+  labels,
 }: {
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
+  labels?: Partial<Record<T, string>>;
 }) {
   return (
     <div className="segmented">
@@ -152,7 +154,7 @@ export function Segmented<T extends string>({
           className={`seg-btn ${value === opt ? "active" : ""}`}
           onClick={() => onChange(opt)}
         >
-          {opt}
+          {labels?.[opt] ?? opt}
         </button>
       ))}
     </div>

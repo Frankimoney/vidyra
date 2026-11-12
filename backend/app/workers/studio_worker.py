@@ -29,11 +29,6 @@ from ..services import studio as studio_service
 from ..services import usage as usage_service
 from ..services.storage.base import as_absolute
 
-# Tools whose GPU work is many sequential passes rather than one sample, and
-# so need a proportionally longer wall-clock budget on RunPod.
-MOTION_TIMEOUT_SCALE = {"motion": 3}
-
-
 def _artifact_token(run_id: str, secret: str) -> str:
     """HMAC token a GPU worker must present to stream an artifact back."""
     return hmac.new(secret.encode(), f"studio:{run_id}".encode(), hashlib.sha256).hexdigest()[:40]
@@ -144,12 +139,6 @@ class StudioWorker:
         started = time.time()
         last_elapsed_progress = 8
         timeout = self.settings.runpod_timeout_minutes * 60
-        if tool in MOTION_TIMEOUT_SCALE:
-            # A 30s Wan-Animate-2 transfer is up to 12 sequential 81-frame
-            # windows on one pod, so it needs a far longer leash than the
-            # single-pass tools; everything else keeps the normal budget.
-            timeout = max(timeout, self.settings.runpod_timeout_minutes
-                          * 60 * MOTION_TIMEOUT_SCALE[tool])
         while True:
             time.sleep(self.settings.runpod_poll_seconds)
             status = runpod_client.get_run_status(api_base, self.settings.runpod_api_key, endpoint, runpod_run_id)
@@ -282,8 +271,8 @@ class StudioWorker:
         width = int(params.get("width") or (576 if tool != "txt2img" else 1024))
         height = int(params.get("height") or (1024 if tool != "txt2img" else 1024))
         fps = int(params.get("fps") or 24)
-        # Multi-window tools (Wan-Animate-2) ask for seconds, single-pass tools
-        # for frames; the placeholder should be the length the user requested.
+        # Some callers ask for seconds instead of frames; the placeholder
+        # should still be the length the user requested.
         frames = int(params.get("frames") or 0)
         if not frames and params.get("duration"):
             frames = int(round(float(params["duration"]) * fps))

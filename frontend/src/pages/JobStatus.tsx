@@ -60,10 +60,9 @@ function DirectorNotes({ filmPlot, settings }: { filmPlot: any; settings?: any }
             ⚠ Lip-sync unavailable
           </strong>
           <span className="muted">
-            The talking-head model isn&apos;t installed on the AI Studio worker, so the
-            hosts are moving portraits instead of talking. The dialogue is still there
-            — only the mouth animation is missing. Fix by adding the InfiniteTalk
-            custom node pack to the RunPod image.
+            The lip-sync step could not finish, so these shots keep their motion but
+            the mouths are not animated. The dialogue audio is still there — check the
+            RunPod worker logs if this keeps happening.
           </span>
         </div>
       )}

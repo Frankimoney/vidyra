@@ -1376,7 +1376,7 @@ export default function Editor() {
     try {
       const created = await api.createStudioRun({
         tool: "txt2img",
-        model: "flux-schnell",
+        model: "sdxl",
         prompt,
         params: { aspect: settings?.aspect || "9:16" },
         refs: [],

@@ -23,57 +23,32 @@ COPY deploy/runpod/requirements.txt /tmp/runpod-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/runpod-requirements.txt
 
 # ---- ComfyUI -----------------------------------------------------------
-# Pinned, not main: Wan-Animate-2 (WanAnimate2ToVideo / WanAnimate2Cache) is
-# still marked experimental upstream, so its schema can change between commits.
-# Bump ARG COMFYUI_REF deliberately; the assertion below fails the build if a
-# bump drops a node this worker depends on.
+# Pinned, not main: Wan I2V and camera-control node schemas change between
+# commits. Bump ARG COMFYUI_REF deliberately; the assertion below fails the
+# build if a bump drops a node this worker depends on.
 ARG COMFYUI_REF=77c0f39e343aa83597d67cd95811df9e4fbfef2e
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI \
     && cd /ComfyUI \
     && git checkout --quiet "$COMFYUI_REF" \
     && test -f comfy_extras/nodes_wan.py \
-    && for node in WanAnimate2ToVideo WanAnimate2Cache TrimVideoLatent; do \
+    && for node in WanImageToVideo WanFirstLastFrameToVideo WanCameraEmbedding WanCameraImageToVideo; do \
          grep -q "node_id=\"$node\"" comfy_extras/nodes_wan.py \
          || { echo "FATAL: pinned ComfyUI is missing $node"; exit 1; }; \
        done \
-    && echo "ComfyUI $(git rev-parse --short HEAD): Wan Animate 2 nodes present" \
+    && echo "ComfyUI $(git rev-parse --short HEAD): Wan nodes present" \
     && pip install --no-cache-dir -r requirements.txt
 
-# ---- Custom nodes (video diffusion, motion transfer) -------------------
+# ---- Custom nodes (video output) ---------------------------------------
 # VideoHelperSuite is pinned too: the worker names its exact inputs
-# (frame_load_cap / skip_first_frames on VHS_LoadVideo, frame_rate / format on
-# VHS_VideoCombine), and those widgets were renamed upstream.
+# (frame_rate / format on VHS_VideoCombine), and those widgets were renamed
+# upstream.
 ARG VHS_REF=4d907bee61e92c2e65af3bd6383a4e4d356126d1
 RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git \
       /ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite \
     && cd /ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite \
     && git checkout --quiet "$VHS_REF" \
-    && grep -q '"skip_first_frames"' videohelpersuite/load_video_nodes.py \
-    && ! grep -q '"video_load_cap"' videohelpersuite/load_video_nodes.py \
     && grep -q '"frame_rate"' videohelpersuite/nodes.py \
     && pip install --no-cache-dir -r requirements.txt
-
-RUN git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git \
-      /ComfyUI/custom_nodes/ComfyUI-AnimateDiff-Evolved
-
-RUN git clone https://github.com/ShmuelRonen/ComfyUILivePortraitKJ.git \
-      /ComfyUI/custom_nodes/ComfyUILivePortraitKJ \
-    || true
-
-# Wan2.1 support nodes (ComfyUI-WanVideoWrapper for I2V/V2V)
-RUN git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git \
-      /ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper \
-    && cd /ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper \
-    && pip install --no-cache-dir -r requirements.txt || true
-
-# 48GB-only: character consistency (SDXL IP-Adapter FaceID + InstantID).
-# Models stay on the network volume; nodes only here. Phase 2 graphs get
-# smoke-tested on the pod before the backend routes to native InstantID nodes.
-RUN git clone https://github.com/comfyorg/comfyui-ipadapter.git \
-      /ComfyUI/custom_nodes/comfyui-ipadapter || true
-RUN git clone https://github.com/huxiuhan/ComfyUI-InstantID.git \
-      /ComfyUI/custom_nodes/ComfyUI-InstantID || true
-RUN pip install --no-cache-dir insightface onnxruntime-gpu || pip install --no-cache-dir insightface onnxruntime || true
 
 # 48GB-only voice clone (open-source, MIT): Chatterbox Turbo zero-shot TTS.
 # ~0.5B params, needs seconds of ref audio. Runs in the same pod beside
@@ -109,15 +84,6 @@ RUN git clone "$WAV2LIP_REPO" /Wav2Lip \
     && test -s face_detection/detection/sfd/s3fd.pth \
     && test -s checkpoints/wav2lip_gan.pth \
     && echo "Wav2Lip ready: $(du -h checkpoints/wav2lip_gan.pth | cut -f1) ckpt"
-
-# Film's high-quality 48GB path. The node pack fetches its own Fastcam/VGGFace
-# assets on first use; the base Wan I2V weights come from the network volume.
-# The backend falls back to the img2video shot if this is unavailable, so it is
-# installed best-effort and flagged in the README as needing a pod smoke test.
-RUN git clone https://github.com/MeigenAI/ComfyUI-InfiniteTalkMulti.git \
-      /ComfyUI/custom_nodes/ComfyUI-InfiniteTalkMulti \
-    && cd /ComfyUI/custom_nodes/ComfyUI-InfiniteTalkMulti \
-    && pip install --no-cache-dir -r requirements.txt || true
 
 # Git history is not needed at runtime and is large in the final image.
 RUN rm -rf /ComfyUI/.git /Wav2Lip/.git /ComfyUI/custom_nodes/*/.git

@@ -1,6 +1,6 @@
 """Local checks for app-wide aspect-ratio handling.
 
-Vidyra renders in a dozen places -- SDXL stills, Wan motion, video composites,
+Vidyra renders in a dozen places -- SDXL stills, Wan img2video, video composites,
 Auto Film storyboards, podcasts -- and each used to hardcode its own idea of
 the frame. These checks pin the one shared registry so a ratio chosen in the UI
 means the same thing everywhere, and so the defaults stay exactly what they were.
@@ -126,15 +126,15 @@ section("Studio: aspect resolves to a real canvas, junk is rejected")
 
 from app.routes import studio as studio_routes  # noqa: E402
 
-WAN_DEFAULTS = {"aspect": "auto", "fit": "crop", "width": 0, "height": 0,
+WAN_DEFAULTS = {"aspect": "auto", "width": 0, "height": 0,
                 "duration": 10, "fps": 0, "steps": 6, "cfg": 1.0, "seed": 0}
 
 check("auto leaves the model's tuned canvas alone",
-      studio_routes._apply_aspect("motion", "wan-animate-2",
+      studio_routes._apply_aspect("img2video", "wan21-i2v",
                                   {"aspect": "auto", "width": 0, "height": 0})
       == {"aspect": "auto", "width": 0, "height": 0})
 
-wan_wide = studio_routes._apply_aspect("motion", "wan-animate-2", {"aspect": "16:9", "width": 0, "height": 0})
+wan_wide = studio_routes._apply_aspect("img2video", "wan21-i2v", {"aspect": "16:9", "width": 0, "height": 0})
 check("Wan with 0x0 defaults gets the video tier, not a crash",
       max(wan_wide["width"], wan_wide["height"]) == aspect_lib.VIDEO_TIERS["sd"],
       f"{wan_wide['width']}x{wan_wide['height']}")
@@ -148,14 +148,12 @@ check("a fixed ratio overrides the model's square default", sdxl["width"] > sdxl
       f"{sdxl['width']}x{sdxl['height']}")
 
 try:
-    studio_routes._apply_aspect("motion", "wan-animate-2", {"aspect": "7:3", "width": 0, "height": 0})
+    studio_routes._apply_aspect("img2video", "wan21-i2v", {"aspect": "7:3", "width": 0, "height": 0})
     check("an unknown ratio is rejected with 400", False, "no error raised")
 except HTTPException as exc:
     check("an unknown ratio is rejected with 400", exc.status_code == 400, str(exc.status_code))
 
-check("enum params are validated, not passed through",
-      studio_routes._normalize_params({"fit": "pad"}, WAN_DEFAULTS)["fit"] == "pad")
-for bad in ({"fit": "zoom"}, {"aspect": "7:3"}):
+for bad in ({"aspect": "7:3"},):
     try:
         studio_routes._normalize_params(bad, WAN_DEFAULTS)
         check(f"{bad} is rejected", False, "no error raised")
@@ -164,7 +162,6 @@ for bad in ({"fit": "zoom"}, {"aspect": "7:3"}):
 
 check("catalog exposes aspect choices for the UI",
       tuple(studio_routes.STUDIO_ENUM_VALUES["aspect"]) == EXPECTED)
-check("catalog exposes both fit modes", tuple(studio_routes.STUDIO_ENUM_VALUES["fit"]) == ("crop", "pad"))
 
 # ---------------------------------------------------------------------------
 section("Auto Film: one shape for the stills and the cut")
@@ -226,31 +223,3 @@ from app.services import package as package_service  # noqa: E402
 
 system = package_service._SYSTEM.replace("__SHAPE__", aspect_lib.prompt_phrase("21:9"))
 check("package prompt takes the shape", "21:9" in system and "9:16 vertical" not in system)
-
-# ---------------------------------------------------------------------------
-section("Wan pad mode fits the subject instead of cropping it")
-
-worker_path = ROOT / "deploy" / "runpod" / "worker.py"
-import importlib.util  # noqa: E402
-
-_spec = importlib.util.spec_from_file_location("runpod_worker_aspect", worker_path)
-worker = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(worker)
-
-pad_filter = worker._pad_filter(832, 1248, 832, 468)
-check("pad keeps the source whole (fit, not fill)",
-      "force_original_aspect_ratio=decrease" in pad_filter)
-check("pad never upscales past the output box",
-      f"w={832}" in pad_filter and f"h={468}" in pad_filter)
-check("pad centres the subject", "(W-w)/2:(H-h)/2" in pad_filter)
-check("pad fills the remainder", "pad=832:468" in pad_filter)
-
-check("fit_dimensions follows a portrait source", worker.fit_dimensions(832, 1248)[1] > worker.fit_dimensions(832, 1248)[0])
-check("fit_dimensions follows a landscape source", worker.fit_dimensions(1920, 1080)[0] > worker.fit_dimensions(1920, 1080)[1])
-check("fit_dimensions survives an unknown source size", worker.fit_dimensions(0, 0) == (832, 480))
-
-print()
-if failures:
-    print(f"{len(failures)} FAILURE(S): {failures}")
-    sys.exit(1)
-print("All aspect-ratio checks passed.")

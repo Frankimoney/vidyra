@@ -1,20 +1,13 @@
-"""Tests for AI Podcast: scriptwriter + the full fake-mode podcast pipeline.
+"""Unit tests for the podcast scriptwriter (template + LLM normalization + scripts).
 
-Part 1: podcast scriptwriter unit tests (template + LLM normalization + scripts).
-Part 2: end-to-end podcast in fake-GPU mode through an in-process TestClient
-        (real workers: template writer → per-host portraits → per-turn TTS +
-        lip-sync clips → storyboard render, all offline).
+The public podcast endpoint was removed with the non-Flow feature trim, so this
+file only covers the writer helpers that still back the hidden worker path.
 
-Requires RUNPOD_FAKE=1, Piper voices in models/piper, and ffmpeg on PATH.
-
-Run:  STORAGE_ROOT=storage/testpodcast RUNPOD_FAKE=1 APP_ENV=development \
-        DEV_API_KEY=vidyra-dev-key PYTHONPATH=backend \
-        .venv/Scripts/python.exe scripts/test_podcast.py
+Run:  PYTHONPATH=backend .venv/Scripts/python.exe scripts/test_podcast.py
 """
 
 import os
 import sys
-import time
 
 os.environ.setdefault("STORAGE_ROOT", "storage/testpodcast")
 os.environ.setdefault("RUNPOD_FAKE", "1")
@@ -103,109 +96,10 @@ def test_podcast_outline_script():
     check("has Name: line blocks", "Alex: Welcome back." in text and "Sam: Great intro!" in text, text)
 
 
-def test_full_podcast_fake_mode():
-    print("full fake-mode podcast flow:")
-    import wave
-
-    from pipeline.utils import run_cmd as _std_run_cmd
-
-    # Stub ALL piper voices with 1s silent WAVs (both the engine's narration and
-    # the podcast worker's per-turn TTS) so the offline test runs fast.
-    import pipeline.narration as narration
-
-    _orig_narr_run = narration.run_cmd
-
-    def fast_piper(command, input_text=None):
-        if command and command[0] == "piper":
-            out = None
-            for i, arg in enumerate(command):
-                if arg == "--output_file":
-                    out = command[i + 1]
-                    break
-            if out:
-                with wave.open(out, "wb") as w:
-                    w.setnchannels(1)
-                    w.setsampwidth(2)
-                    w.setframerate(24000)
-                    w.writeframes(b"\x00\x00" * 24000)  # 1s silent narration
-                return None
-        return _std_run_cmd(command, input_text)
-
-    narration.run_cmd = fast_piper
-    import app.workers.film_worker as film_worker
-
-    film_worker.run_cmd = fast_piper
-
-    from starlette.testclient import TestClient
-
-    from app.main import app
-
-    key = "vidyra-dev-key"
-    H = {"Authorization": f"Bearer {key}"}
-
-    with TestClient(app) as client:
-        r = client.post(
-            "/api/podcasts",
-            headers=H,
-            json={
-                "topic": "Why everyone is talking about sleep",
-                "turns_count": 2,
-                "hosts": [
-                    {"name": "Alex", "description": "a friendly tech journalist"},
-                    {"name": "Sam", "description": "a skeptical but warm co-host"},
-                ],
-                "captions": False,
-                "lip_sync": True,
-                "music": "",
-            },
-        )
-        check("podcast job created (201)", r.status_code == 201, r.text[:300])
-        if r.status_code != 201:
-            return
-        job_id = r.json()["job_id"]
-
-        deadline = time.time() + 240
-        job = None
-        while time.time() < deadline:
-            job = client.get(f"/api/jobs/{job_id}", headers=H)
-            status = (job.json().get("status") or "")
-            if status in ("completed", "failed"):
-                break
-            time.sleep(1)
-        body = job.json() if job else {}
-        check("podcast job completed", body.get("status") == "completed", str(body.get("status")) + " " + str(body.get("error", "")))
-        if body.get("status") != "completed":
-            return
-
-        check("job titled from topic", bool(body.get("title")), body.get("title", ""))
-        plot = body.get("filmPlot") or {}
-        turns = plot.get("turns") or []
-        check("outline has 2 turns", len(turns) == 2, str(len(turns)))
-        check("outline has 2 hosts with voices",
-              len(plot.get("characters") or []) == 2
-              and all((c.get("voice") or "") for c in plot.get("characters") or []),
-              str(plot.get("characters")))
-
-        out = body.get("output") or {}
-        check("output video published", out.get("storagePath", "").startswith("videos/"), str(out.get("storagePath")))
-        check("output duration present", bool(out.get("duration")), str(out.get("duration")))
-
-        runs = client.get("/api/studio/runs", headers=H).json()
-        podcast_runs = [r for r in runs if (r.get("title") or "").startswith("Podcast")]
-        # 2 host portraits (txt2img) + 2 lip-sync turns; the lip path shadows the
-        # img2video fallback in fake mode because the fake lip run succeeds.
-        check("created 4 studio runs (2 portraits + 2 lip-sync)", len(podcast_runs) == 4, str(len(podcast_runs)))
-        check("all podcast runs completed", all(r.get("status") == "completed" for r in podcast_runs),
-              str([(r.get("tool"), r.get("status")) for r in podcast_runs]))
-        tools = sorted({r.get("tool") for r in podcast_runs})
-        check("used txt2img + lip", "txt2img" in tools and "lip" in tools, str(tools))
-
-
 def main() -> int:
     test_template_podcast()
     test_llm_podcast_normalization()
     test_podcast_outline_script()
-    test_full_podcast_fake_mode()
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} -> {FAILURES}")

@@ -2,8 +2,8 @@
 
 Runs ComfyUI on the GPU pod and drives it through its local HTTP API.
 Each job received from the backend carries:
-  tool        e.g. "txt2img" | "img2video" | "motion" | "v2v"
-  model       e.g. "sdxl", "flux-schnell", "wan21-i2v", "liveportrait", ...
+  tool        e.g. "txt2img" | "img2video" | "lipsync"
+  model       e.g. "sdxl", "wan21-i2v", ...
   prompt      text
   params      width/height/steps/frames/fps/cfg/denoise/negative/...
   refs        [{path, url}] signed source media URLs to download
@@ -23,12 +23,9 @@ output image/video must be pushed to the backend before the handler returns.
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import os
-import re
 import runpod
 import shutil
 import subprocess
@@ -42,18 +39,17 @@ import urllib.request
 # matching the keys below, or override per-run via params["model_file"]).
 MODEL_FILES = {
     "sdxl": {"ckpt": "sd_xl_base_1.0.safetensors"},
-    "flux-schnell": {"unet": "flux1-schnell.safetensors"},
-    "flux-dev": {"unet": "flux1-dev.safetensors"},
     "wan21-i2v": {
         "unet": "wan2.1_i2v_480p_14B_fp8_scaled.safetensors",
         "clip_vision": "clip_vision_h.safetensors",
+        "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "vae": "wan_2.1_vae.safetensors",
     },
     "wan21-flf2v": {
         "unet": "wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors",
         "clip_vision": "clip_vision_h.safetensors",
-    },
-    "wan21-v2v": {
-        "unet": "wan2.1_i2v_480p_14B_fp8_scaled.safetensors",
+        "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "vae": "wan_2.1_vae.safetensors",
     },
     "wan22-cam-i2v": {
         # Wan2.2 Fun Camera Control: two-pass (high/low noise) camera-aware I2V.
@@ -63,39 +59,12 @@ MODEL_FILES = {
         "vae": "wan_2.1_vae.safetensors",
         "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
     },
-    "animatediff": {
-        "motion": "mm_sd_v15_v2.ckpt",
-        "ckpt": "v1-5-pruned-emaonly.safetensors",
-    },
-    "liveportrait": {"ckpt": "liveportrait.ckpt"},
-    "wan-animate-2": {
-        # Wan-Animate-2 14B (Apache-2.0). Full-body motion transfer from a
-        # driving video, no pose/skeleton extraction: the model reads the pose
-        # branch straight off the reference video. Files from the
-        # Comfy-Org/Wan-Animate-2 repack on the network volume.
-        "unet": "wan_animate_2_int8_convrot.safetensors",
-        "lora": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
-        "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-        "clip_vision": "clip_vision_h.safetensors",
-        "vae": "Wan2_1_VAE_bf16.safetensors",
-    },
-    "infinitetalk-multi": {
-        # Meigen InfiniteTalk Multi — loads its own checkpoints under ComfyUI
-        # custom nodes (models/Fastcam / models/VGGFace etc.); no entry needed.
-    },
     # "lipsync" is intentionally absent: Wav2Lip runs directly in the pod (see
     # _run_lipsync) and its checkpoints are baked into the image, so there is
     # nothing to provision on the network volume.
-    # 48GB-only character lock: SDXL portrait-consistent restyle.
-    # Backed by the proven SDXL img2img graph (no new node contract until the
-    # native InstantID graph is smoke-tested on the pod). Files provisioned on
-    # the network volume for phase 2 native routing.
+    # Character lock reuses the SDXL img2img graph, so it shares the SDXL ckpt.
     "sdxl-character": {
         "ckpt": "sd_xl_base_1.0.safetensors",
-        "ipadapter": "ip-adapter-plus-face_sdxl_vit-h.safetensors",
-        "instantid_ip": "ip-adapter.bin",
-        "instantid_control": "diffusion_pytorch_model.safetensors",
-        "insightface": "antelopev2",
     },
 }
 
@@ -105,29 +74,6 @@ OUTPUT_DIR = os.getenv("COMFY_OUTPUT", "/ComfyUI/output")
 WAV2LIP_DIR = os.getenv("WAV2LIP_DIR", "/Wav2Lip")
 FAKE = os.getenv("RUNPOD_FAKE", "0") == "1"
 HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "20"))
-FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
-FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
-
-# Wan-Animate-2 renders in fixed 81-frame windows (4k+1 latent length) and
-# stitches them with the node's own `continue_motion` / `video_frame_offset`
-# extension path, so a 30s clip is 9 sequential ComfyUI prompts on one resident
-# model rather than one impossible 720-frame diffusion pass.
-WAN_WINDOW = 81
-WAN_OVERLAP = 1
-WAN_SHIFT = 5.0
-WAN_SAMPLER = "lcm"
-WAN_SCHEDULER = "simple"
-WAN_STEPS = 6
-WAN_CACHE_DEVICE = os.getenv("WAN_CACHE_DEVICE", "gpu")
-WAN_CACHE_DTYPE = os.getenv("WAN_CACHE_DTYPE", "int8")
-# Upstream's own negative; keeps colour/exposure/compression artefacts out and
-# is what the model was trained against.
-WAN_NEGATIVE = (
-    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，"
-    "整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，"
-    "画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，"
-    "静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
-)
 
 
 def _http_json(url: str, payload=None, timeout: int = 60):
@@ -203,338 +149,6 @@ def _run_workflow(graph: dict, on_done=None) -> list[str]:
     return [o for o in outputs if o]
 
 
-def _fetch_output(filename: str, dest: str):
-    url = f"{COMFY_URL}/view?filename={urllib.parse.quote(filename)}&type=output"
-    with urllib.request.urlopen(url, timeout=300) as resp, open(dest, "wb") as fh:
-        fh.write(resp.read())
-
-
-# ---------------------------------------------------------------------------
-# Media probing / ffmpeg helpers (used by the multi-window motion path)
-# ---------------------------------------------------------------------------
-
-def _run_ff(cmd: list):
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-
-
-def _parse_rate(value) -> float:
-    """ffmpeg's "30000/1001" rational frame rate."""
-    try:
-        text = str(value or "")
-        if "/" in text:
-            num, den = text.split("/", 1)
-            den_f = float(den)
-            return round(float(num) / den_f, 3) if den_f else 0.0
-        return round(float(text), 3)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def probe_video(path: str) -> dict:
-    """Best-effort ffprobe. Empty dict when ffprobe is unavailable."""
-    try:
-        proc = _run_ff([
-            FFPROBE, "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames",
-            "-show_entries", "format=duration",
-            "-of", "json", path,
-        ])
-        data = json.loads(proc.stdout or "{}")
-    except Exception:
-        return {}
-    streams = data.get("streams") or [{}]
-    stream = streams[0] if isinstance(streams[0], dict) else {}
-    meta = data.get("format") or {}
-    fps = _parse_rate(stream.get("avg_frame_rate")) or _parse_rate(stream.get("r_frame_rate"))
-    try:
-        duration = float(meta.get("duration") or 0)
-    except (TypeError, ValueError):
-        duration = 0.0
-    try:
-        frames = int(stream.get("nb_frames") or 0)
-    except (TypeError, ValueError):
-        frames = 0
-    if not frames and duration and fps:
-        frames = int(round(duration * fps))
-    return {
-        "width": int(stream.get("width") or 0),
-        "height": int(stream.get("height") or 0),
-        "fps": fps,
-        "frames": frames,
-        "duration": round(duration, 3),
-    }
-
-
-def _snap(value, lo: int, hi: int) -> int:
-    """Wan wants dimensions on a 16px grid."""
-    v = max(lo, min(hi, int(value or lo)))
-    return max(lo, min(hi, (v // 16) * 16 or 16))
-
-
-def fit_dimensions(src_w: int, src_h: int, lo: int = 256, hi: int = 1280) -> tuple:
-    """Orientation-preserving 16px-grid dimensions for a source frame size.
-
-    Wan-Animate-2 centre-crops both the reference image and the driving clip
-    into the output box, so a portrait driving clip rendered into a landscape
-    box would slice the body out of frame. Follow the source's orientation and
-    only round the long side to the grid.
-    """
-    src_w, src_h = int(src_w or 0), int(src_h or 0)
-    if src_w <= 0 or src_h <= 0:
-        return 832, 480
-    portrait = src_h > src_w
-    long_src, short_src = (src_h, src_w) if portrait else (src_w, src_h)
-    long_side = _snap(long_src, lo, hi)
-    ratio = short_src / float(long_src)
-    short_side = max(lo, _snap(int(round(long_side * ratio)), lo, hi))
-    return (short_side, long_side) if portrait else (long_side, short_side)
-
-
-def _pad_filter(src_w: int, src_h: int, out_w: int, out_h: int) -> str:
-    """ffmpeg filter that fits a frame into the output box without cropping.
-
-    Scales to fit inside the box, then pads the remainder with a heavily
-    blurred, stretched copy of itself. Solid black would read as a broken
-    render; the blur reads as deliberate letterboxing.
-    """
-    if src_w <= 0 or src_h <= 0:
-        return f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2"
-    scale = (
-        f"scale=w={out_w}:h={out_h}:force_original_aspect_ratio=decrease:force_divisible_by=16"
-    )
-    pad = f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color=black"
-    # Blurred background plate, then the sharp fit composited on top.
-    plate = (
-        f"split=2[bg][fg];[bg]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-        f"crop={out_w}:{out_h},gblur=sigma=28,eq=brightness=-0.06[bgb];"
-        f"[fg]{scale}[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2"
-    )
-    return f"{plate},{pad}"
-
-
-def probe_image(path: str) -> dict:
-    """Width/height of a still, via ffmpeg (Pillow may not be installed)."""
-    proc = _run_ff([FFMPEG, "-i", path])
-    text = (proc.stderr or "")
-    width = height = 0
-    m = re.search(r"[, ](\d{2,5})x(\d{2,5})[\s,]", text)
-    if m:
-        width, height = int(m.group(1)), int(m.group(2))
-    return {"width": width, "height": height}
-
-
-def pad_image_to(src: str, dest: str, out_w: int, out_h: int) -> str:
-    """Fit a still into out_w x out_h, padding rather than cropping.
-
-    Cropping a full-body reference to 16:9 slices arms and legs off, and the
-    animation faithfully reproduces a body with no arms.
-    """
-    info = probe_image(src)
-    vf = _pad_filter(int(info.get("width") or 0), int(info.get("height") or 0),
-                     out_w, out_h)
-    proc = _run_ff([FFMPEG, "-y", "-i", src, "-vf", vf, "-frames:v", "1", dest])
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed padding the reference image: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def pad_video_to(src: str, dest: str, out_w: int, out_h: int, fps: int) -> str:
-    """Fit a driving clip into out_w x out_h, padding rather than cropping.
-
-    The pose branch reads this clip, so a padded matte means the model sees
-    the same framing the reference photo has and the motion stays in frame.
-    """
-    info = probe_video(src)
-    sw = int(info.get("width") or 0)
-    sh = int(info.get("height") or 0)
-    vf = _pad_filter(sw, sh, out_w, out_h)
-    cmd = [FFMPEG, "-y", "-i", src, "-an", "-vf", vf, "-r", str(int(fps)),
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
-           "-pix_fmt", "yuv420p", dest]
-    proc = _run_ff(cmd)
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed padding the driving clip: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def _round4k1(value: int) -> int:
-    """Smallest 4k+1 window >= value (Wan latent frames are 4k+1)."""
-    return max(5, 4 * ((max(1, value) + 3) // 4) + 1)
-
-
-def _floor4k1(value: int) -> int:
-    """Largest 4k+1 window <= value."""
-    return max(1, 4 * ((max(1, value) - 1) // 4) + 1)
-
-
-def wan_fragment_plan(total_frames: int, available: int = 0) -> list:
-    """Split an output length into Wan-Animate-2 windows.
-
-    Window 0 emits every frame it renders. Every later window repeats the
-    previous window's last frame as `continue_motion` (the node reports that
-    overlap as ``trim_image``), so it only adds ``length - 1`` new frames.
-    Because a window length has to stay on the 4k+1 grid, the last window is
-    allowed to over-produce by up to 3 frames; the stitcher trims the tail to
-    the exact request.
-
-    ``available`` is the driving clip's frame count, so a clip shorter than the
-    request shortens the result instead of leaving the tail frozen (Wan holds
-    the final pose video frame when it runs out).
-    """
-    total = max(1, int(total_frames))
-    if available:
-        total = min(total, max(1, int(available)))
-    plan: list = []
-    clip_pos = 0
-    produced = 0
-    while produced < total:
-        carry = bool(plan)
-        floor = 9 if carry else 5  # a carry window needs length > WAN_OVERLAP
-        needed = (total - produced) + (WAN_OVERLAP if carry else 0)
-        length = min(WAN_WINDOW, _round4k1(needed))
-        if available:
-            room = available - clip_pos
-            if room < floor:
-                break
-            length = _floor4k1(min(length, room))
-        if length < floor:
-            break
-        keep = length - (WAN_OVERLAP if carry else 0)
-        if keep < 1:
-            break
-        plan.append({
-            "length": length,
-            "keep": keep,
-            "start": clip_pos,
-            "carry": carry,
-        })
-        clip_pos += length
-        produced += keep
-
-    # Trim the 4k+1 rounding surplus off the tail.
-    while plan:
-        over = produced - total
-        if over <= 0:
-            break
-        if over >= plan[-1]["keep"]:
-            produced -= plan.pop()["keep"]
-            continue
-        plan[-1]["keep"] -= over
-        break
-    return [frag for frag in plan if frag["keep"] >= 1]
-
-
-def _newest_output(prefix: str) -> str:
-    """Newest file in the output dir starting with prefix (VHS names its
-    outputs `<prefix>_00001_.mp4` and we do not want to depend on the history
-    payload shape)."""
-    best, best_mtime = "", -1.0
-    try:
-        entries = os.listdir(OUTPUT_DIR)
-    except OSError:
-        return ""
-    for name in entries:
-        if not name.startswith(prefix) or not name.lower().endswith((".mp4", ".webm", ".mkv")):
-            continue
-        full = os.path.join(OUTPUT_DIR, name)
-        try:
-            mtime = os.path.getmtime(full)
-        except OSError:
-            continue
-        if mtime > best_mtime:
-            best, best_mtime = name, mtime
-    return best
-
-
-def normalise_window(src: str, dest: str, fps: int, drop_first: int, keep: int) -> str:
-    """Re-encode one rendered window to CFR and drop the carried frame.
-
-    Stream-copy concat needs every segment to agree on frame count and timing,
-    and the first frame of a continuation window is the previous window's last
-    frame (the node's ``trim_image`` overlap), so it has to come off here.
-    """
-    filters = []
-    if drop_first:
-        filters.append(f"trim=start_frame={int(drop_first)}")
-    filters.append("setpts=N/FRAME_RATE/TB")
-    cmd = [FFMPEG, "-y", "-i", src, "-an", "-vf", ",".join(filters),
-           "-r", str(int(fps)), "-frames:v", str(int(keep))]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            "-pix_fmt", "yuv420p", dest]
-    proc = _run_ff(cmd)
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed normalising window: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def extract_last_frame(src: str, dest: str, keep: int) -> str:
-    """Pull the final frame of a normalised window for the next
-    `continue_motion`. The caller knows the frame count exactly, so this is a
-    deterministic frame pick rather than a seek to the end."""
-    last = max(0, int(keep) - 1)
-    cmd = [FFMPEG, "-y", "-i", src, "-an", "-vsync", "0",
-           "-vf", f"select=eq(n\\,{last})", "-frames:v", "1", "-update", "1", dest]
-    proc = _run_ff(cmd)
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed extracting carry frame: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def concat_windows(parts: list, dest: str) -> str:
-    """Join already-normalised windows without re-encoding."""
-    listing = dest + ".txt"
-    with open(listing, "w", encoding="utf-8") as fh:
-        for part in parts:
-            fh.write(f"file '{os.path.abspath(part)}'\n")
-    proc = _run_ff([FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", listing,
-                    "-c", "copy", "-movflags", "+faststart", dest])
-    try:
-        os.remove(listing)
-    except OSError:
-        pass
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed joining windows: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def resample_driving(src: str, dest: str, fps: int, seconds: float = 0.0) -> str:
-    """Put the driving clip on the output frame rate.
-
-    Frame indices in `continue_motion`/`video_frame_offset` and the output
-    frame count are both derived from this file, so it must be constant-rate
-    before it reaches ComfyUI.
-    """
-    cmd = [FFMPEG, "-y", "-i", src, "-an", "-r", str(int(fps))]
-    if seconds > 0:
-        cmd += ["-t", f"{float(seconds):.3f}"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
-            "-pix_fmt", "yuv420p", dest]
-    proc = _run_ff(cmd)
-    if proc.returncode != 0 or not os.path.isfile(dest):
-        raise RuntimeError(f"ffmpeg failed resampling the driving clip: {(proc.stderr or '')[-400:]}")
-    return dest
-
-
-def _vhs_load_video(name: str, frame_cap: int = 0, skip_first: int = 0,
-                    force_rate: int = 0) -> dict:
-    """VHS_LoadVideo inputs.
-
-    Current VideoHelperSuite exposes `frame_load_cap`/`skip_first_frames`; the
-    older `video_load_cap` name and the `fps` widget on VHS_VideoCombine are
-    gone, and ComfyUI rejects a graph that names an input a node no longer has.
-    Kept in one place so a pack upgrade is a one-line change.
-    """
-    return {
-        "video": name,
-        "force_rate": int(force_rate or 0),
-        "custom_width": 0,
-        "custom_height": 0,
-        "frame_load_cap": int(frame_cap or 0),
-        "skip_first_frames": int(skip_first or 0),
-        "select_every_nth": 1,
-    }
-
-
 def _vhs_combine(images, fps: int, prefix: str, save: bool = True) -> dict:
     return {
         "images": images,
@@ -556,25 +170,12 @@ def _build_txt2img(params: dict) -> dict:
     p = params.get("params") or {}
     w, h = int(p.get("width", 1024)), int(p.get("height", 1024))
     steps = int(p.get("steps", 30))
-    cfg = float(p.get("cfg", 1.0 if model.startswith("flux") else 7.0))
+    cfg = float(p.get("cfg", 7.0))
     seed = int(p.get("seed", 0))
     positive = params.get("prompt", "")
     negative = str(p.get("negative", ""))
     files = params.get("model_files") or MODEL_FILES.get(model, {})
 
-    if model in ("flux-schnell", "flux-dev"):
-        # FLUX via UNETLoader + CLIPLoader (t5v + clip_l fp8) + diffuse
-        return {
-            "4": {"class_type": "UNETLoader", "inputs": {"unet_name": files.get("unet", "flux1-schnell.safetensors"), "weight_dtype": "default"}},
-            "10": {"class_type": "LoraLoader", "inputs": {"model": ["4", 0], "clip": ["11", 0], "lora_name": None, "strength_model": 1.0, "strength_clip": 1.0}},
-            "11": {"class_type": "CLIPLoader", "inputs": {"clip_name1": "t5xxl_fp8_e4m3fn.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux", "device": "default"}},
-            "12": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["10", 1], "text": positive}},
-            "13": {"class_type": "EmptySD3LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
-            "14": {"class_type": "KSampler", "inputs": {"model": ["10", 0], "positive": ["12", 0], "negative": ["12", 0], "latent_image": ["13", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
-            "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["16", 0]}},
-            "16": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
-            "17": {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": "vidyra_txt2img"}},
-        }
     # SDXL
     ckpt = files.get("ckpt", "sd_xl_base_1.0.safetensors")
     return {
@@ -602,22 +203,6 @@ def _build_img2video(params: dict) -> dict:
     files = params.get("model_files") or MODEL_FILES.get(model, {})
     image_name = params.get("ref_files", {}).get("image", "SOURCE_IMAGE.png")
 
-    if model == "animatediff":
-        motion = files.get("motion", "mm_sd_v15_v2.ckpt")
-        ckpt = files.get("ckpt", "v1-5-pruned-emaonly.safetensors")
-        # Canonical ComfyUI-AnimateDiff-Evolved image-to-video graph.
-        return {
-            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
-            "2": {"class_type": "LoadImage", "inputs": {"image": image_name}},
-            "3": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["2", 0]}},
-            "4": {"class_type": "VAEEncode", "inputs": {"pixels": ["3", 0], "vae": ["1", 2]}},
-            "5": {"class_type": "ADE_StandardAnimateDiff", "inputs": {"model": ["1", 0], "motion_model": motion, "motion_lora": None, "scale_multival": None, "effect_multival": None, "ad_keyframes": None, "sample_settings": None}},
-            "6": {"class_type": "ADE_UseEvolvedSampling", "inputs": {"model": ["5", 0], "positive": ["7", 0], "negative": ["7", 0], "latent_image": ["4", 0], "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "karras", "denoise": denoise}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["1", 1]}},
-            "8": {"class_type": "KSampler", "inputs": {"model": ["6", 0], "positive": ["7", 0], "negative": ["7", 0], "latent_image": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "karras", "denoise": denoise}},
-            "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["1", 2]}},
-            "10": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["9", 0], fps, "vidyra_i2v")},
-        }
     if model == "wan22-cam-i2v":
         # Wan2.2 Fun Camera Control: cinematic camera motion from a still image.
         # Mirrors ComfyUI's official "Wan 2.2 Fun Camera Control" workflow —
@@ -671,8 +256,8 @@ def _build_img2video(params: dict) -> dict:
 
         graph = {
             "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
-            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name1": "umt5_xxl_fp8_e4m3fn.safetensors", "clip_name2": "", "type": "wan", "device": "default"}},
-            "3": {"class_type": "VAELoader", "inputs": {"vae_name": "wan2.1_vae.safetensors"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name1": files.get("clip", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"), "clip_name2": "", "type": "wan", "device": "default"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", "wan_2.1_vae.safetensors")}},
             "4": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": vision}},
             "5": {"class_type": "LoadImage", "inputs": {"image": start_name}},
             "6": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["5", 0]}},
@@ -710,228 +295,6 @@ def _build_img2video(params: dict) -> dict:
         graph["10"] = {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["9", 0], fps, "vidyra_i2v")}
         return graph
     raise ValueError(f"Unsupported img2video model: {model}")
-
-
-def _build_wan_animate(params: dict, length: int, start: int, carry: str = "") -> dict:
-    """One Wan-Animate-2 window, as a native ComfyUI graph.
-
-    Wan-Animate-2 (Apache-2.0, core ComfyUI nodes) animates the person in a
-    reference image using a driving video: facial animation, body motion and
-    hand gestures are read straight off that clip, with no pose/skeleton
-    extraction step.
-
-    Windows are chained through the node's own extension inputs rather than a
-    ComfyUI loop: `continue_motion` takes the previous window's last frame and
-    `video_frame_offset`/`skip_first_frames` advance the driving clip, so each
-    window is an independent prompt that the pod stitches together. The
-    reference image is re-sent every window, which is what keeps identity
-    stable across a long clip.
-    """
-    p = params.get("params") or {}
-    files = params.get("model_files") or MODEL_FILES["wan-animate-2"]
-    refs = params.get("ref_files") or {}
-    width = _snap(p.get("width") or 832, 256, 1280)
-    height = _snap(p.get("height") or 480, 256, 1280)
-    fps = int(p.get("fps") or 24)
-    steps = int(p.get("steps") or WAN_STEPS)
-    cfg = float(p.get("cfg") or 1.0)
-    seed = int(p.get("seed") or 0)
-    positive = str(params.get("prompt") or "")
-    negative = str(p.get("negative") or WAN_NEGATIVE)
-    target = refs.get("image") or "TARGET.png"
-    driving = refs.get("video") or "DRIVING.mp4"
-    cache_device = str(p.get("cache_device") or WAN_CACHE_DEVICE)
-    cache_dtype = str(p.get("cache_dtype") or WAN_CACHE_DTYPE)
-
-    graph = {
-        "1": {"class_type": "UNETLoader", "inputs": {
-            "unet_name": files.get("unet", MODEL_FILES["wan-animate-2"]["unet"]),
-            "weight_dtype": "default"}},
-        # LightX2V step-distill LoRA is what makes 4-6 steps viable.
-        "2": {"class_type": "LoraLoaderModelOnly", "inputs": {
-            "model": ["1", 0],
-            "lora_name": files.get("lora", MODEL_FILES["wan-animate-2"]["lora"]),
-            "strength_model": float(p.get("lora_strength", 1.0))}},
-        # Runs the pose branch once per window instead of on every step:
-        # roughly halves the time for ~6GB of VRAM (int8) or ~6GB of RAM (cpu).
-        "3": {"class_type": "WanAnimate2Cache", "inputs": {
-            "model": ["2", 0], "device": cache_device, "dtype": cache_dtype}},
-        "4": {"class_type": "ModelSamplingSD3", "inputs": {
-            "model": ["3", 0], "shift": WAN_SHIFT}},
-        "5": {"class_type": "CLIPLoader", "inputs": {
-            "clip_name1": files.get("clip", MODEL_FILES["wan-animate-2"]["clip"]),
-            "clip_name2": "", "type": "wan", "device": "default"}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": positive}},
-        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": negative}},
-        "8": {"class_type": "CLIPVisionLoader", "inputs": {
-            "clip_name": files.get("clip_vision", MODEL_FILES["wan-animate-2"]["clip_vision"])}},
-        "9": {"class_type": "LoadImage", "inputs": {"image": target}},
-        "10": {"class_type": "CLIPVisionEncode", "inputs": {
-            "clip_vision": ["8", 0], "image": ["9", 0], "crop": "none"}},
-        "11": {"class_type": "VAELoader", "inputs": {
-            "vae_name": files.get("vae", MODEL_FILES["wan-animate-2"]["vae"])}},
-        "12": {"class_type": "VHS_LoadVideo", "inputs": _vhs_load_video(
-            driving, frame_cap=length, skip_first=start)},
-        "20": {"class_type": "WanAnimate2ToVideo", "inputs": {
-            "positive": ["6", 0],
-            "negative": ["7", 0],
-            "vae": ["11", 0],
-            "width": width,
-            "height": height,
-            "length": int(length),
-            "batch_size": 1,
-            "reference_image": ["9", 0],
-            "pose_video": ["12", 0],
-            "clip_vision_output": ["10", 0],
-            "video_frame_offset": 0,
-            "pose_strength": float(p.get("pose_strength", 1.0)),
-            "pose_start_percent": float(p.get("pose_start_percent", 0.0)),
-            "pose_end_percent": float(p.get("pose_end_percent", 1.0)),
-            "reference_image_strength": float(p.get("reference_image_strength", 1.0))}},
-        # The reference frame is prepended to the latent, so trim it before the
-        # decode or every window leads with a duplicate of the still.
-        "13": {"class_type": "TrimVideoLatent", "inputs": {
-            "samples": ["20", 2], "trim_amount": ["20", 3]}},
-        "14": {"class_type": "VAEDecode", "inputs": {"samples": ["13", 0], "vae": ["11", 0]}},
-        "15": {"class_type": "BasicScheduler", "inputs": {
-            "model": ["4", 0], "scheduler": WAN_SCHEDULER, "steps": steps, "denoise": 1.0}},
-        "16": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": WAN_SAMPLER}},
-        "17": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
-        "18": {"class_type": "CFGGuider", "inputs": {
-            "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "cfg": cfg}},
-        "19": {"class_type": "SamplerCustom", "inputs": {
-            "add_noise": True,
-            "noise": ["17", 0],
-            "guider": ["18", 0],
-            "sampler": ["16", 0],
-            "sigmas": ["15", 0],
-            "positive": ["6", 0],
-            "negative": ["7", 0],
-            "latent_image": ["20", 2],
-            "disable_noise": False}},
-        "21": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(
-            ["14", 0], fps, params.get("output_prefix") or "vidyra_wan2")},
-    }
-    if carry:
-        graph["22"] = {"class_type": "LoadImage", "inputs": {"image": carry}}
-        graph["20"]["inputs"]["continue_motion"] = ["22", 0]
-    return graph
-
-
-def _build_motion(params: dict) -> dict:
-    """Motion transfer dispatcher.
-
-    ``wan-animate-2`` is the full-body path (target photo + driving video, no
-    pose extraction) and needs several windows stitched by
-    ``_run_motion_wan``. ``liveportrait`` is the older face-only path and stays
-    available for head-and-shoulders shots.
-    """
-    model = params.get("model") or "liveportrait"
-    if model == "wan-animate-2":
-        # Only reachable when a caller wants a single window directly; the pod's
-        # handler normally routes this model through _run_motion_wan.
-        return _build_wan_animate(params, length=WAN_WINDOW, start=0)
-
-    p = params.get("params") or {}
-    files = params.get("model_files") or MODEL_FILES.get("liveportrait", {})
-    ckpt = files.get("ckpt", "liveportrait.ckpt")
-    target = (params.get("ref_files") or {}).get("image", "TARGET.png")
-    driving = (params.get("ref_files") or {}).get("video", "DRIVING.mp4")
-    fps = int(p.get("fps") or 24)
-    frames = int(p.get("frames") or 0)
-    load = _vhs_load_video(driving, frame_cap=frames)
-    return {
-        "1": {"class_type": "LoadFaceModel", "inputs": {"model_name": ckpt}},
-        "2": {"class_type": "LoadImage", "inputs": {"image": target}},
-        # Load the whole driving clip, not just its first frame: the point of
-        # the tool is that the face actually moves over time.
-        "3": {"class_type": "VHS_LoadVideo", "inputs": load},
-        "4": {"class_type": "LivePortraitProcessFace", "inputs": {"face_model": ["1", 0], "image": ["2", 0]}},
-        # Driving faces come from the driving video. Feeding node 4 into both
-        # slots made every frame identical to the source and produced a still.
-        "5": {"class_type": "LivePortraitProcessFace", "inputs": {"face_model": ["1", 0], "image": ["3", 0]}},
-        "6": {"class_type": "LivePortraitTransferMotion", "inputs": {"src_face": ["4", 0], "driving_face": ["5", 0]}},
-        "7": {"class_type": "LivePortraitRender", "inputs": {"face_model": ["1", 0], "transferred": ["6", 0], "target_image": ["2", 0], "driving_video": ["3", 0]}},
-        "8": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["7", 0], fps, "vidyra_motion")},
-    }
-
-
-def _build_v2v(params: dict) -> dict:
-    p = params.get("params") or {}
-    w, h = int(p.get("width", 832)), int(p.get("height", 480))
-    frames = int(p.get("frames", 81))
-    fps = int(p.get("fps", 16))
-    steps = int(p.get("steps", 20))
-    cfg = float(p.get("cfg", 5.0))
-    seed = int(p.get("seed", 0))
-    denoise = float(p.get("denoise", 0.7))
-    positive = params.get("prompt", "")
-    files = params.get("model_files") or MODEL_FILES.get("wan21-v2v", {})
-    video_name = params.get("ref_files", {}).get("video", "SOURCE.mp4")
-    unet = files.get("unet", "wan2.1_i2v_480p_14B_fp8_scaled.safetensors")
-    return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name1": "umt5_xxl_fp8_e4m3fn.safetensors", "clip_name2": "", "type": "wan", "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "wan2.1_vae.safetensors"}},
-        "4": {"class_type": "LoadVideo", "inputs": {"video": video_name}},
-        "5": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["4", 0]}},
-        "6": {"class_type": "WanVideoToVideo", "inputs": {"width": w, "height": h, "length": frames, "batch_size": 1, "positive": positive, "negative": "", "video": ["5", 0], "clip": ["2", 0]}},
-        "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["6", 0], "negative": ["6", 1], "latent_image": ["6", 2], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "denoise": denoise}},
-        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
-        "9": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["8", 0], fps, "vidyra_v2v")},
-    }
-
-
-def _build_lip_sync(params: dict) -> dict:
-    """Talking head: animate a character portrait with an audio track.
-
-    Targets the Meigen InfiniteTalk Multi ComfyUI custom-node pack
-    (https://github.com/MeigenAI/ComfyUI-InfiniteTalkMulti). The graph follows
-    the pack's documented dual-speaker workflow: load the portrait, load the
-    audio with a clip, build the InfiniteTalkMulti model, and animate.
-
-    NOTE: this graph is authored to the InifiniteTalkMulti node contract and
-    MUST be smoke-tested once on a real GPU pod against the installed custom
-    nodes (and its companion checkpoints), like the other builders.
-    """
-    p = params.get("params") or {}
-    w, h = int(p.get("width", 832)), int(p.get("height", 480))
-    frames = int(p.get("frames", 81))
-    fps = int(p.get("fps", 24))
-    steps = int(p.get("steps", 20))
-    cfg = float(p.get("cfg", 5.0))
-    seed = int(p.get("seed", 0))
-    positive = params.get("prompt", "")
-    refs = params.get("ref_files", {})
-    portrait = refs.get("image", "PORTRAIT.png")
-    audio = refs.get("audio", "SPEECH.mp3")
-
-    return {
-        # Audio -> CLIP (shorter clip clips should be audio-length; 240s cap)
-        "1": {"class_type": "LoadAudio", "inputs": {"audio": audio}},
-        "2": {"class_type": "CLIPAudioEncode", "inputs": {"clip": ["6", 1], "audio": ["1", 0]}},
-        # Portrait load + resize to the target frame
-        "3": {"class_type": "LoadImage", "inputs": {"image": portrait}},
-        "4": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["3", 0]}},
-        # Text prompt (optional) + dual-model setup
-        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["6", 0], "text": positive}},
-        "6": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "mochi_clip_fp32.safetensors", "clip_name2": "mochi_clip_fp32.safetensors", "type": "infinitetalk", "device": "default"}},
-        "7": {"class_type": "UNETLoader", "inputs": {"unet_name": "infiniteTalkMultiNoisePredict.safetensors", "weight_dtype": "default"}},
-        "8": {"class_type": "InfiniteTalkMulti", "inputs": {
-            "model1": ["7", 0], "clip": ["6", 0],
-            "steps": steps, "cfg": cfg, "seed": seed,
-            "width": w, "height": h, "fps": fps,
-            "ask_dro": False, "second_dropovo": True,
-            "prompt": ["5", 0], "negative": ["5", 0],
-            "clip_audio": ["2", 0],
-            "dropova": True, "dropovb": None,
-            "num_workers": 1,
-            "input_image1": ["4", 0],
-        }},
-        "9": {"class_type": "VAELoader", "inputs": {"vae_name": "moonshine_vae.safetensors"}},
-        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["9", 0]}},
-        "11": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["10", 0], fps, "vidyra_lip")},
-    }
 
 
 def _build_img2img(params: dict) -> dict:
@@ -996,12 +359,6 @@ def build_workflow(params: dict) -> dict:
         return _build_img2img(params)
     if tool == "img2video":
         return _build_img2video(params)
-    if tool == "motion":
-        return _build_motion(params)
-    if tool == "v2v":
-        return _build_v2v(params)
-    if tool == "lip":
-        return _build_lip_sync(params)
     # "lipsync" never reaches here: the handler routes it to _run_lipsync,
     # which drives Wav2Lip directly instead of a ComfyUI node.
     raise ValueError(f"Unknown tool: {tool}")
@@ -1161,160 +518,6 @@ def _run_lipsync(inputs, base, art_path, token, report, start):
     }
 
 
-def _run_motion_wan(inputs, base, art_path, token, report, start):
-    """Full-body motion transfer via Wan-Animate-2, run window by window.
-
-    Wan-Animate-2 renders a fixed 81-frame window, so a 10-30s clip is 3-9
-    sequential prompts against one already-resident model rather than one
-    impossible 720-frame diffusion pass. Each window after the first repeats
-    the previous window's last frame through the node's `continue_motion`
-    input, which is the model's own video-extension path; the windows are then
-    stitched losslessly with ffmpeg.
-
-    Why this runs in the worker rather than through `build_workflow`: it needs
-    ffmpeg between prompts, per-window progress, and a fallback if the pose
-    cache does not fit in VRAM. Same callback/artifact transport as the other
-    pod-side tools.
-    """
-    run_id = str(inputs.get("run_id") or "x")
-    p = dict(inputs.get("params") or {})
-    run_dir = os.path.join(INPUT_DIR, f"run_{run_id}")
-    report(10, "Fetching source media")
-    staged = _fetch_refs(inputs.get("refs"), run_dir)
-    by_role: dict = {}
-    for role, dest in staged:
-        by_role.setdefault(role or "", dest)
-    target = by_role.get("image") or by_role.get("reference")
-    driving = by_role.get("video")
-    if not target or not driving:
-        return {"status": "error",
-                "error": "Motion transfer needs a target photo (image) and a driving video (video)."}
-
-    info = probe_video(driving)
-    # fps 0 = match the driving clip, so motion speed is preserved instead of
-    # being resampled (which would slow a 30fps clip to 0.8x at 24fps).
-    fps = int(p.get("fps") or 0) or int(round(info.get("fps") or 0)) or 24
-    duration = float(p.get("duration") or 0)
-    want = int(round(duration * fps)) if duration else int(p.get("frames") or 0)
-
-    work = os.path.join(OUTPUT_DIR, f"wan_{run_id}")
-    os.makedirs(work, exist_ok=True)
-    try:
-        report(12, "Preparing the driving clip")
-        cfr = resample_driving(driving, os.path.join(work, "drive_cfr.mp4"), fps)
-        cinfo = probe_video(cfr)
-        available = int(cinfo.get("frames") or 0)
-        if not want:
-            want = available or WAN_WINDOW
-        want = max(1, min(want, 900))
-        if available:
-            want = min(want, available)
-
-        plan = wan_fragment_plan(want, available)
-        if not plan:
-            return {"status": "error",
-                    "error": "Could not plan any Wan Animate 2 window for this clip."}
-
-        if p.get("width") and p.get("height"):
-            width, height = int(p["width"]), int(p["height"])
-        else:
-            width, height = fit_dimensions(
-                int(cinfo.get("width") or info.get("width") or 0),
-                int(cinfo.get("height") or info.get("height") or 0),
-            )
-
-        # "crop" (default) lets the model centre-crop into the box, which
-        # fills the frame but can cut the subject. "pad" fits both inputs
-        # whole onto a blurred matte first, so a forced ratio never amputates
-        # anyone's arms or legs.
-        fit_mode = str(p.get("fit") or "crop").strip().lower()
-        if fit_mode == "pad":
-            report(13, f"Fitting source media into {width}x{height} without cropping")
-            target = pad_image_to(target, os.path.join(work, "target_pad.png"), width, height)
-            cfr = pad_video_to(cfr, os.path.join(work, "drive_pad.mp4"), width, height, fps)
-            cinfo = probe_video(cfr)
-
-        target_name = _upload_input(target)
-        kept = sum(frag["keep"] for frag in plan)
-        seconds = round(kept / fps, 2)
-        note = ""
-        if available and want < round((duration or seconds) * fps):
-            note = f" (clip is {round(available / fps, 1)}s)"
-        report(14, f"Wan Animate 2: {len(plan)} window{'s' if len(plan) > 1 else ''} "
-                   f"-> {seconds}s at {width}x{height}, {fps}fps{note}")
-
-        carry = ""
-        parts: list = []
-        for index, frag in enumerate(plan):
-            prefix = f"vidyra_wan2_{run_id}_w{index}_"
-            graph_params = {
-                "model": "wan-animate-2",
-                "prompt": inputs.get("prompt") or "",
-                "params": {**p, "width": width, "height": height, "fps": fps,
-                           "output_prefix": prefix},
-                "ref_files": {"image": target_name, "video": os.path.basename(cfr)},
-                "model_files": inputs.get("model_files") or None,
-            }
-            report(16 + int(62 * index / len(plan)),
-                   f"Wan Animate 2 window {index + 1}/{len(plan)} "
-                   f"({frag['length']} frames, {p.get('steps') or WAN_STEPS} steps)")
-            try:
-                _run_workflow(_build_wan_animate(graph_params, frag["length"],
-                                                 frag["start"], carry))
-            except RuntimeError as first:
-                # The pose cache is the only thing here sized against VRAM;
-                # fall back to system RAM before failing the whole run.
-                if str(p.get("cache_device") or WAN_CACHE_DEVICE) == "cpu":
-                    raise
-                report(16 + int(62 * index / len(plan)),
-                       "Pose cache did not fit in VRAM, retrying on system RAM")
-                graph_params["params"]["cache_device"] = "cpu"
-                _run_workflow(_build_wan_animate(graph_params, frag["length"],
-                                                 frag["start"], carry))
-
-            produced = _newest_output(prefix)
-            if not produced:
-                raise RuntimeError(f"Wan Animate 2 window {index + 1} wrote no video")
-            part = normalise_window(
-                os.path.join(OUTPUT_DIR, produced),
-                os.path.join(work, f"part_{index:02d}.mp4"),
-                fps,
-                1 if frag["carry"] else 0,
-                frag["keep"],
-            )
-            parts.append(part)
-            if index + 1 < len(plan):
-                carry_png = os.path.join(INPUT_DIR, f"wan_{run_id}_carry_{index}.png")
-                extract_last_frame(part, carry_png, frag["keep"])
-                carry = _upload_input(carry_png)
-
-        final = concat_windows(parts, os.path.join(OUTPUT_DIR, f"vidyra_motion_{run_id}.mp4"))
-        report(90, f"Done: {seconds}s of motion")
-        uploaded = []
-        if base and art_path:
-            _post_file(f"{base}{art_path}", final, token)
-        uploaded.append(os.path.basename(final))
-        return {
-            "status": "ok",
-            "elapsed": round(time.time() - start, 1),
-            "uploads": uploaded,
-            "windows": len(plan),
-            "frames": kept,
-            "fps": fps,
-            "duration": seconds,
-        }
-    except Exception as exc:
-        report(99, f"Worker error: {exc}")
-        return {"status": "error", "error": str(exc), "elapsed": round(time.time() - start, 1)}
-    finally:
-        try:
-            import shutil
-
-            shutil.rmtree(work, ignore_errors=True)
-        except Exception:
-            pass
-
-
 def handler(job):
     """RunPod handler — the job.input is the backend's studio run payload."""
     start = time.time()
@@ -1350,12 +553,6 @@ def handler(job):
 
         report(5, "Preparing GPU")
         _wait_for_comfy()
-
-        # Wan-Animate-2 needs ffmpeg between prompts (81-frame windows stitched
-        # through the node's continue_motion chain), so it runs pod-side instead
-        # of as one ComfyUI graph.
-        if inputs.get("tool") == "motion" and inputs.get("model") == "wan-animate-2":
-            return _run_motion_wan(inputs, base, art_path, token, report, start)
 
         run_dir = os.path.join(INPUT_DIR, f"run_{inputs.get('run_id', 'x')}")
         report(10, "Fetching source media")

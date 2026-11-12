@@ -18,15 +18,10 @@ COLLECTION = "usage"
 #: Conservative per-run estimates in USD. Update when model pricing changes;
 #: the ledger stores the number it used, so history never shifts retroactively.
 PRICE_PER_RUN: dict[str, float] = {
-    "flux-schnell": 0.006,
-    "flux-dev": 0.030,
-    "sd15": 0.005,
     "sdxl": 0.012,
-    "animatediff": 0.020,
     "wan21-i2v": 0.090,
     "wan21-flf2v": 0.090,
     "wan22-cam-i2v": 0.120,
-    "wan-animate-2": 0.150,
 }
 DEFAULT_PRICE = 0.050
 

@@ -2,6 +2,15 @@ name: Build RunPod images
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Which RunPod image to build
+        type: choice
+        options:
+          - both
+          - studio
+          - pipeline
+        default: both
 
 permissions:
   contents: read
@@ -14,6 +23,7 @@ concurrency:
 jobs:
   pipeline:
     name: Build pipeline image
+    if: ${{ github.event.inputs.target != 'studio' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -54,6 +64,7 @@ jobs:
 
   studio:
     name: Build studio image
+    if: ${{ github.event.inputs.target != 'pipeline' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:

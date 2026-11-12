@@ -176,17 +176,17 @@ check(
 
 
 section("Usage ledger")
-usage.record(UID, workspace_id=WORKSPACE, model="flux-schnell", reference="test-1")
+usage.record(UID, workspace_id=WORKSPACE, model="sdxl", reference="test-1")
 usage.record(UID, workspace_id=WORKSPACE, model="wan21-i2v", units=2, reference="test-2")
 summary = usage.summary(UID, workspace_id=WORKSPACE, days=1)
 check("runs counted", summary["runs"] == 3, str(summary["runs"]))
-check("cost uses the price table", abs(summary["estimated_cost"] - 0.186) < 1e-6,
+check("cost uses the price table", abs(summary["estimated_cost"] - 0.192) < 1e-6,
       str(summary["estimated_cost"]))
 check("daily runs counted", usage.daily_runs(UID, WORKSPACE) == 3)
 check("other workspace is isolated", usage.daily_runs(UID, "other") == 0)
 check(
     "prices are ordered by model weight",
-    usage.price_for("wan-animate-2") > usage.price_for("flux-schnell"),
+    usage.price_for("wan21-i2v") > usage.price_for("sdxl"),
 )
 check("unknown model has a fallback price", usage.price_for("mystery") == usage.DEFAULT_PRICE)
 

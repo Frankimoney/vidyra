@@ -402,9 +402,6 @@ export type StudioTool =
   | "img2img"
   | "character"
   | "img2video"
-  | "motion"
-  | "v2v"
-  | "lip"
   | "lipsync"
   | "voiceclone";
 
@@ -434,15 +431,16 @@ export interface StudioCatalog {
   modelParams: Record<string, Record<string, Record<string, unknown>>>;
   /** Per-model ref slots: modelRefs[tool][model] = StudioRefSpec[]. */
   modelRefs?: Record<string, Record<string, StudioRefSpec[]>>;
+  /** Human-readable model names for the picker. */
+  modelLabels?: Record<string, string>;
   /** Conservative per-run USD estimates for the cost hint. */
   prices?: Record<string, number>;
   defaultPrice?: number;
-  /** Choice lists for enum params (aspect ratios, fit mode) + their labels. */
+  /** Choice lists for enum params (aspect ratios) + their labels. */
   paramOptions?: {
     aspect?: string[];
     aspectLabels?: Record<string, string>;
-    fit?: string[];
-    fitLabels?: Record<string, string>;
+    camera_pose?: string[];
   };
 }
 

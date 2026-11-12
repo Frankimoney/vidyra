@@ -19,11 +19,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from starlette.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
-from app.routes.studio import (  # noqa: E402
-    TOOL_MODELS,
-    _normalize_params,
-    _param_bounds,
-)
 
 KEY = "vidyra-dev-key"
 H = {"Authorization": f"Bearer {KEY}"}
@@ -43,7 +38,7 @@ def main() -> int:
         check("catalog 200", r.status_code == 200, str(r.status_code))
         cat = r.json()
         check("studio enabled (fake)", cat.get("enabled") and cat.get("fake"))
-        check("9 tools", len(cat.get("tools", [])) == 9, str(len(cat.get("tools", []))))
+        check("6 tools", len(cat.get("tools", [])) == 6, str(len(cat.get("tools", []))))
         check("img2img tool listed",
               any(t.get("tool") == "img2img" for t in cat.get("tools", [])))
         check("lipsync tool listed",
@@ -52,6 +47,21 @@ def main() -> int:
               any(t.get("tool") == "character" for t in cat.get("tools", [])))
         check("voice clone tool listed",
               any(t.get("tool") == "voiceclone" for t in cat.get("tools", [])))
+
+        print("catalog only exposes controls the model honors:")
+        params = cat.get("modelParams", {})
+        lipsync = params.get("lipsync", {}).get("wav2lip", {})
+        check("Wav2Lip has no diffusion/prompt controls", lipsync == {}, str(lipsync))
+        voice = params.get("voiceclone", {}).get("chatterbox-turbo", {})
+        check("Chatterbox has no seed/negative controls",
+              "seed" not in voice and "negative" not in voice, str(voice))
+        camera = params.get("img2video", {}).get("wan22-cam-i2v", {})
+        check("camera model exposes trajectory controls",
+              "camera_pose" in camera and "camera_speed" in camera, str(camera))
+        check("camera model hides unused denoise", "denoise" not in camera, str(camera))
+        check("catalog publishes camera pose choices",
+              "Zoom In" in cat.get("paramOptions", {}).get("camera_pose", []),
+              str(cat.get("paramOptions", {}).get("camera_pose")))
 
         print("create txt2img run:")
         r = client.post(
@@ -84,13 +94,16 @@ def main() -> int:
         check("primary is image", primary.get("kind") == "image", str(primary.get("kind")))
 
         print("serve artifact:")
-        url = primary.get("url", "")
-        path = url.split("127.0.0.1", 1)[-1]
-        if not path.startswith("/api"):
-            path = url[url.find("/api"):] if "/api" in url else path
-        r = client.get(path)
-        check("artifact 200", r.status_code == 200, str(r.status_code))
-        check("artifact non-empty", len(r.content) > 100, f"{len(r.content)} bytes")
+        if getattr(app.state.storage, "kind", "") == "local":
+            url = primary.get("url", "")
+            path = url.split("127.0.0.1", 1)[-1]
+            if not path.startswith("/api"):
+                path = url[url.find("/api"):] if "/api" in url else path
+            r = client.get(path)
+            check("artifact 200", r.status_code == 200, str(r.status_code))
+            check("artifact non-empty", len(r.content) > 100, f"{len(r.content)} bytes")
+        else:
+            print("  SKIP  serve artifact (storage backend is not local)")
 
         print("list runs:")
         r = client.get("/api/studio/runs", headers=H)
@@ -213,102 +226,33 @@ def main() -> int:
         mr = client.get("/api/catalog/studio", headers=H).json().get("modelRefs", {})
         i2v_roles = [s["role"] for s in mr.get("img2video", {}).get("wan21-i2v", [])]
         flf_roles = [s["role"] for s in mr.get("img2video", {}).get("wan21-flf2v", [])]
-        ani_roles = [s["role"] for s in mr.get("img2video", {}).get("animatediff", [])]
+        cam_roles = [s["role"] for s in mr.get("img2video", {}).get("wan22-cam-i2v", [])]
         check("i2v slots = start + reference", i2v_roles == ["image", "reference"], str(i2v_roles))
         check("flf2v slots = start + end + reference", flf_roles == ["image", "end_image", "reference"], str(flf_roles))
-        check("animatediff slots = start only", ani_roles == ["image"], str(ani_roles))
+        check("cam-i2v slots = start only", cam_roles == ["image"], str(cam_roles))
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "img2video", "model": "animatediff", "prompt": "x",
+            json={"tool": "img2video", "model": "wan22-cam-i2v", "prompt": "x",
                   "refs": [{"path": src_path, "role": "end_image"}]},
         )
-        check("animatediff rejects end-only", r.status_code == 400, str(r.status_code))
+        check("cam-i2v rejects end-only", r.status_code == 400, str(r.status_code))
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "img2video", "model": "animatediff", "prompt": "x",
+            json={"tool": "img2video", "model": "wan22-cam-i2v", "prompt": "x",
                   "refs": [{"path": src_path, "role": "image"}]},
         )
-        check("animatediff accepts start", r.status_code == 201, r.text[:200])
-
-        print("motion transfer (Wan-Animate-2, full body):")
-        motion = [t for t in cat.get("tools", []) if t.get("tool") == "motion"]
-        check("motion tool listed", bool(motion))
-        motion_models = motion[0].get("models", []) if motion else []
-        check("wan-animate-2 is the default motion model",
-              motion_models[:1] == ["wan-animate-2"], str(motion_models))
-        check("liveportrait kept as face-only fallback",
-              "liveportrait" in motion_models, str(motion_models))
-        motion_params = cat.get("modelParams", {}).get("motion", {}).get("wan-animate-2", {})
-        check("motion is specified in seconds, not frames",
-              "duration" in motion_params and "frames" not in motion_params,
-              str(sorted(motion_params)))
-        check("width/height default to auto",
-              motion_params.get("width") == 0 and motion_params.get("height") == 0,
-              f"{motion_params.get('width')}x{motion_params.get('height')}")
-        check("motion needs a photo and a driving video",
-              [s["role"] for s in mr.get("motion", {}).get("wan-animate-2", [])]
-              == ["image", "video"],
-              str([s["role"] for s in mr.get("motion", {}).get("wan-animate-2", [])]))
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={"tool": "motion", "model": "wan-animate-2", "prompt": "a dancer",
-                  "refs": [{"path": src_path, "role": "image"}]},
-        )
-        check("motion rejects a photo with no driving video", r.status_code == 400,
-              str(r.status_code))
-        bounded = _normalize_params(
-            {"duration": 999, "fps": 480, "width": 99999, "steps": 999, "cfg": 99},
-            TOOL_MODELS["motion"]["wan-animate-2"],
-            _param_bounds("motion", "wan-animate-2"),
-        )
-        check("duration clamped to 30s", bounded.get("duration") == 30,
-              str(bounded.get("duration")))
-        check("fps clamped to 60", bounded.get("fps") == 60, str(bounded.get("fps")))
-        check("width clamped to 1280", bounded.get("width") == 1280,
-              str(bounded.get("width")))
-        check("height stays auto when unset", bounded.get("height") == 0,
-              str(bounded.get("height")))
-        check("steps clamped to the distilled 6-step sweet spot",
-              bounded.get("steps") == 12, str(bounded.get("steps")))
-        drive_path = _upload_clip(client, H)
-        check("driving clip uploaded", bool(drive_path), drive_path)
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={"tool": "motion", "model": "wan-animate-2", "prompt": "a dancer",
-                  "params": {"duration": 4, "width": 320, "height": 192, "fps": 24},
-                  "refs": [{"path": src_path, "role": "image"},
-                           {"path": drive_path, "role": "video"}]},
-        )
-        check("motion run created with refs", r.status_code == 201, r.text[:200])
-        motion_run = r.json().get("run_id")
-        motion_out = None
-        for _ in range(60):
-            time.sleep(1)
-            motion_out = client.get(f"/api/studio/runs/{motion_run}", headers=H).json()
-            if motion_out.get("status") in ("completed", "failed"):
-                break
-        check("motion run completes", motion_out.get("status") == "completed",
-              str(motion_out.get("error") or motion_out.get("status")))
-        primary = (motion_out.get("output") or {}).get("primary") or {}
-        check("motion placeholder is a video", primary.get("kind") == "video",
-              str(primary.get("kind")))
-        check("motion placeholder length follows duration",
-              3.0 <= float(primary.get("duration") or 0) <= 6.0,
-              f"{primary.get('duration')}s for a 4s request")
+        check("cam-i2v accepts start", r.status_code == 201, r.text[:200])
 
         print("aspect ratio drives the real canvas (fake render, checked end to end):")
         for ratio, want_portrait in (("16:9", False), ("1:1", False), ("4:5", True)):
             r = client.post(
                 "/api/studio/runs",
                 headers=H,
-                json={"tool": "motion", "model": "wan-animate-2", "prompt": "a dancer",
-                      "params": {"duration": 3, "fps": 16, "aspect": ratio, "fit": "pad"},
-                      "refs": [{"path": src_path, "role": "image"},
-                               {"path": drive_path, "role": "video"}]},
+                json={"tool": "img2video", "model": "wan21-i2v", "prompt": "a dancer",
+                      "params": {"frames": 24, "fps": 16, "aspect": ratio, "fit": "pad"},
+                      "refs": [{"path": src_path, "role": "image"}]},
             )
             check(f"{ratio} run accepted", r.status_code == 201, r.text[:160])
             run_id = r.json().get("run_id")
@@ -333,31 +277,21 @@ def main() -> int:
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "motion", "model": "wan-animate-2", "prompt": "a dancer",
+            json={"tool": "img2video", "model": "wan21-i2v", "prompt": "a dancer",
                   "params": {"aspect": "7:3"},
-                  "refs": [{"path": src_path, "role": "image"},
-                           {"path": drive_path, "role": "video"}]},
+                  "refs": [{"path": src_path, "role": "image"}]},
         )
         check("an unsupported ratio is refused", r.status_code == 400, str(r.status_code))
-
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={"tool": "motion", "model": "wan-animate-2", "prompt": "a dancer",
-                  "params": {"aspect": "16:9", "fit": "zoom"},
-                  "refs": [{"path": src_path, "role": "image"},
-                           {"path": drive_path, "role": "video"}]},
-        )
-        check("an unsupported fit mode is refused", r.status_code == 400, str(r.status_code))
 
         print("library lists owned assets (uploads + studio artifacts):")
         r = client.get("/api/library", headers=H)
         check("library 200", r.status_code == 200, r.text[:200])
         items = r.json().get("items", [])
         kinds = {it["kind"] for it in items}
-        sources = {it["source"] for it in items}
+        paths = {it["path"] for it in items}
         check("library has image + video", {"image", "video"} <= kinds, str(kinds))
-        check("library includes studio source", "studio" in sources, str(sources))
+        check("library includes studio source", any(p.startswith("studio/") for p in paths),
+              str(paths))
         check("library urls absolute", all(it["url"].startswith("http") for it in items))
         check("library filter works", all(
             it["kind"] == "image" for it in client.get("/api/library?kind=image", headers=H).json()["items"]
@@ -414,42 +348,6 @@ def _tiny_png() -> bytes:
         return base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
         )
-
-
-def _tiny_clip(seconds: float = 2.0) -> bytes:
-    """A short real mp4, used as the motion tool's driving video."""
-    import subprocess
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        path = tmp.name
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi",
-             "-i", f"testsrc2=s=320x192:r=24:d={seconds}",
-             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", path],
-            check=True,
-            capture_output=True,
-        )
-        with open(path, "rb") as fh:
-            return fh.read()
-    except Exception:
-        return b""
-
-
-def _upload_clip(client, headers) -> str:
-    """Upload a driving clip and return its storage path ('' on failure)."""
-    clip = _tiny_clip()
-    if not clip:
-        return ""
-    r = client.post(
-        "/api/uploads",
-        headers=headers,
-        files={"file": ("drive.mp4", clip, "video/mp4")},
-    )
-    if r.status_code != 201:
-        return ""
-    return (r.json().get("items") or [{}])[0].get("storagePath", "")
 
 
 if __name__ == "__main__":

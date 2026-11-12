@@ -42,20 +42,13 @@ from ..services import studio as studio_service
 # Per-model run params for the visuals a film generates (narrow, cost-aware).
 _IMAGE_PARAMS = {
     "sdxl": {"width": 896, "height": 1600, "steps": 30, "cfg": 7.0},
-    "flux-schnell": {"width": 1024, "height": 1792, "steps": 4, "cfg": 1.0},
-    "flux-dev": {"width": 1024, "height": 1792, "steps": 28, "cfg": 1.0},
 }
 _VIDEO_PARAMS = {
     "wan21-i2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0},
     "wan21-flf2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0},
-    "animatediff": {"width": 512, "height": 512, "frames": 16, "fps": 8, "steps": 20, "cfg": 7.0, "denoise": 1.0},
     # Wan2.2 camera control runs a two-pass 14B (high/low noise) with a gentler
     # cfg, mirroring the official ComfyUI Fun Camera workflow.
     "wan22-cam-i2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 3.5, "denoise": 1.0},
-}
-_LIP_PARAMS = {
-    "width": 832, "height": 480, "frames": 81, "fps": 16,
-    "steps": 20, "cfg": 1.0, "denoise": 1.0,
 }
 # Lip-sync a full moving shot (Wav2Lip class) — no diffusion knobs, just framing.
 _ACTING_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16}
@@ -1132,7 +1125,7 @@ class FilmWorker:
         video_model = self.settings.v1_video_model
         lip_sync = bool((job.get("film") or {}).get("lip_sync", True))
 
-        runs_needed = max(2, len(hosts)) + n
+        runs_needed = max(2, len(hosts)) + 2 * n
         dialogue_voices = self._dialogue_voices(outline)
         default_voice = self.video_worker._voice_or_clone(job.get("settings", {}).get("voice", ""))
         host_voice = {
@@ -1232,41 +1225,40 @@ class FilmWorker:
             self._tts_line(line, voice, wav, clone_banks)
             audio_path = self._publish_media(uid, job_id, wav, f"turn_{i:02d}.wav")
 
-            clip_path = None
+            shot = ((turn.get("shot") or "a subtle slow push-in") + ", " + (outline.get("title") or ""))[:1500]
+            motion_path = self._run_studio(
+                job_id,
+                uid,
+                tool="img2video",
+                model=video_model,
+                prompt=shot,
+                params=self._video_params(video_model, turn.get("shot")),
+                refs=[{"path": portrait, "role": "image"}],
+                title=f"Podcast · {speaker}",
+                on_retry=on_retry,
+            )
+
+            clip_path = motion_path
             used_lip = False
             if lip_sync and (self.settings.runpod_enabled or self.settings.runpod_fake):
                 try:
                     clip_path = self._run_studio(
                         job_id,
                         uid,
-                        tool="lip",
-                        model="infinitetalk-multi",
-                        prompt=f"{speaker} speaking in the podcast studio",
-                        params=dict(_LIP_PARAMS),
-                        refs=[{"path": portrait, "role": "image"}, {"path": audio_path, "role": "audio"}],
-                        title=f"Podcast · {speaker}",
+                        tool="lipsync",
+                        model="wav2lip",
+                        prompt="",
+                        params=dict(_ACTING_PARAMS),
+                        refs=[{"path": motion_path, "role": "video"}, {"path": audio_path, "role": "audio"}],
+                        title=f"Podcast · {speaker} talks",
                         on_retry=on_retry,
                     )
                     used_lip = True
                 except Exception as exc:
-                    print(f"[podcast] lip-sync failed ({exc}); falling back to video motion")
-                    clip_path = None
+                    print(f"[podcast] lip-sync failed ({exc}); keeping the moving portrait")
+                    clip_path = motion_path
                     static_turns.append(i + 1)
                     static_reason = str(exc) or exc.__class__.__name__
-
-            if clip_path is None:
-                shot = ((turn.get("shot") or "a subtle slow push-in") + ", " + (outline.get("title") or ""))[:1500]
-                clip_path = self._run_studio(
-                    job_id,
-                    uid,
-                    tool="img2video",
-                    model=video_model,
-                    prompt=shot,
-                    params=self._video_params(video_model, turn.get("shot")),
-                    refs=[{"path": portrait, "role": "image"}],
-                    title=f"Podcast · {speaker}",
-                    on_retry=on_retry,
-                )
 
             clip = clip_path or portrait
             local = os.path.join(media_root, f"turn_{i:02d}{os.path.splitext(clip)[1]}")

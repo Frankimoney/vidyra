@@ -122,7 +122,7 @@ class Settings:
 
     # Film generation (auto "long film" from a one-line idea)
     film_max_scenes: int = int(os.getenv("FILM_MAX_SCENES", "16"))
-    v1_image_model: str = os.getenv("FILM_IMAGE_MODEL", "flux-schnell")
+    v1_image_model: str = os.getenv("FILM_IMAGE_MODEL", "sdxl")
     v1_video_model: str = os.getenv("FILM_VIDEO_MODEL", "wan21-i2v")
 
     # Podcast video generation (talking-head dialogue around a topic)
