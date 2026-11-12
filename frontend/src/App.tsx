@@ -36,10 +36,10 @@ class ErrorBoundary extends React.Component<
               className="btn"
               onClick={() => {
                 this.setState({ error: null });
-                window.location.href = "/";
+                window.location.href = "/studio";
               }}
             >
-              Back to home
+              Back to Studio
             </button>
           </div>
         </div>
@@ -49,16 +49,14 @@ class ErrorBoundary extends React.Component<
   }
 }
 import Login from "./pages/Login";
-import Home from "./pages/Home";
 import Landing from "./pages/Landing";
-import NewVideo from "./pages/NewVideo";
-import Workspace from "./pages/Workspace";
+import StudioLayout from "./pages/StudioLayout";
+import StudioCreate from "./pages/StudioCreate";
 import Studio from "./pages/Studio";
-import SeriesPage from "./pages/SeriesPage";
-import Film from "./pages/Film";
 import Characters from "./pages/Characters";
 import Editor from "./pages/Editor";
-import MyVideos from "./pages/MyVideos";
+import Library from "./pages/Library";
+import Workspace from "./pages/Workspace";
 import Profile from "./pages/Profile";
 import JobStatus from "./pages/JobStatus";
 import ShareWatch from "./pages/ShareWatch";
@@ -68,7 +66,7 @@ import { Spinner } from "./components/ui";
 function RootGate() {
   const { ready } = useAuth();
   if (!ready) return <Landing />;
-  return <AppLayout />;
+  return <Navigate to="/studio" replace />;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -100,44 +98,52 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/v/:token" element={<ShareWatch />} />
-      <Route path="/about" element={<About />} />
-      <Route path="/privacy" element={<Privacy />} />
-      <Route path="/terms" element={<Terms />} />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/v/:token" element={<ShareWatch />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
 
-      <Route path="/" element={<RootGate />}>
-        <Route index element={<Home />} />
-      </Route>
+        <Route path="/" element={<RootGate />} />
 
-      <Route
-        element={
-          <RequireAuth>
-            <AppLayout />
-          </RequireAuth>
-        }
-      >
-        <Route path="/new" element={<NewVideo />} />
-        <Route path="/workspace" element={<Workspace />} />
-        <Route path="/create" element={<Navigate to="/editor" replace />} />
-        <Route path="/studio" element={<Studio />} />
-        <Route path="/film" element={<Film />} />
-        <Route path="/characters" element={<Characters />} />
-        <Route path="/editor" element={<Editor />} />
-        <Route path="/editor/:jobId" element={<Editor />} />
-        <Route path="/storyboard" element={<Navigate to="/editor" replace />} />
-        <Route path="/edit/:jobId" element={<Editor />} />
-        <Route path="/videos" element={<MyVideos />} />
-        <Route path="/series" element={<SeriesPage />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/account" element={<Navigate to="/profile" replace />} />
-        <Route path="/user" element={<Navigate to="/profile" replace />} />
-        <Route path="/job/:jobId" element={<JobStatus />} />
-      </Route>
+        <Route
+          element={
+            <RequireAuth>
+              <AppLayout />
+            </RequireAuth>
+          }
+        >
+          <Route path="/studio" element={<StudioLayout />}>
+            <Route index element={<Navigate to="create" replace />} />
+            <Route path="create" element={<StudioCreate />} />
+            <Route path="scenes" element={<Editor />} />
+            <Route path="scenes/:jobId" element={<Editor />} />
+            <Route path="tools" element={<Studio />} />
+            <Route path="cast" element={<Characters />} />
+          </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+          <Route path="/library" element={<Library />} />
+          <Route path="/workspace" element={<Workspace />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/job/:jobId" element={<JobStatus />} />
+
+          <Route path="/create" element={<Navigate to="/studio/create" replace />} />
+          <Route path="/new" element={<Navigate to="/studio/create" replace />} />
+          <Route path="/film" element={<Navigate to="/studio/create" replace />} />
+          <Route path="/characters" element={<Navigate to="/studio/cast" replace />} />
+          <Route path="/videos" element={<Navigate to="/library" replace />} />
+          <Route path="/series" element={<Navigate to="/studio/create" replace />} />
+          <Route path="/storyboard" element={<Navigate to="/studio/scenes" replace />} />
+          <Route path="/editor" element={<Navigate to="/studio/scenes" replace />} />
+          <Route path="/editor/:jobId" element={<Editor />} />
+          <Route path="/edit/:jobId" element={<Editor />} />
+          <Route path="/account" element={<Navigate to="/profile" replace />} />
+          <Route path="/user" element={<Navigate to="/profile" replace />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </ErrorBoundary>
   );
 }

@@ -369,7 +369,7 @@ function ResearchNote({ run }: { run: StudioRun }) {
   );
 }
 
-function RunResult({ run }: { run: StudioRun }) {
+export function RunResult({ run }: { run: StudioRun }) {
   const primary = run.output?.primary;
   if (!primary) return null;
 
@@ -486,7 +486,13 @@ function SaveCastButton({ run }: { run: StudioRun }) {
 /* Main Studio page                                                    */
 /* ------------------------------------------------------------------ */
 
-export default function Studio() {
+export default function Studio({
+  initialTool,
+  embedded = false,
+}: {
+  initialTool?: StudioTool;
+  embedded?: boolean;
+} = {}) {
   const { uid } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
@@ -496,7 +502,7 @@ export default function Studio() {
   const [runs, setRuns] = useState<StudioRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
 
-  const [tool, setTool] = useState<StudioTool>("txt2img");
+  const [tool, setTool] = useState<StudioTool>(initialTool ?? "txt2img");
   const [model, setModel] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
@@ -515,14 +521,17 @@ export default function Studio() {
       .then((cat) => {
         if (cancelled) return;
         setCatalog(cat);
-        if (cat.tools.length > 0) setTool(cat.tools[0].tool);
+        const preferred = initialTool && cat.tools.some((t) => t.tool === initialTool)
+          ? initialTool
+          : cat.tools[0]?.tool;
+        if (preferred) setTool(preferred);
       })
       .catch((e) => toast(e.message || "Could not load studio catalog.", "error"))
       .finally(() => !cancelled && setCatalogLoading(false));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialTool, toast]);
 
   // Realtime runs subscription
   useEffect(() => {
@@ -681,30 +690,34 @@ export default function Studio() {
 
   return (
     <div className="fade-up">
-      <header style={{ marginBottom: 18 }}>
-        <h2 style={{ marginTop: 0 }}>AI Studio</h2>
-        <p className="faint" style={{ fontSize: "0.88rem", marginTop: -4 }}>
-          {disabled
-            ? "GPU not configured — set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID on the backend to enable."
-            : catalog?.fake
-            ? "Running in fake-GPU mode (local placeholder outputs, no RunPod charges)."
-            : "Powered by RunPod Serverless GPU. Each run bills GPU seconds."}
-        </p>
-      </header>
+      {!embedded && (
+        <header style={{ marginBottom: 18 }}>
+          <h2 style={{ marginTop: 0 }}>AI Studio</h2>
+          <p className="faint" style={{ fontSize: "0.88rem", marginTop: -4 }}>
+            {disabled
+              ? "GPU not configured — set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID on the backend to enable."
+              : catalog?.fake
+              ? "Running in fake-GPU mode (local placeholder outputs, no RunPod charges)."
+              : "Powered by RunPod Serverless GPU. Each run bills GPU seconds."}
+          </p>
+        </header>
+      )}
 
       {disabled ? (
         <EmptyState icon="🔌" title="AI Studio is offline" hint="Configure the backend RunPod credentials to unlock the six AI tools." />
       ) : (
         <div style={{ display: "grid", gap: 18, gridTemplateColumns: "minmax(0, 1fr)" }}>
           <Card>
-            <Segmented
-              options={(catalog?.tools || []).map((t) => t.tool as StudioTool)}
-              labels={toolLabels}
-              value={tool}
-              onChange={(t) => setTool(t)}
-            />
+            {!embedded && (
+              <Segmented
+                options={(catalog?.tools || []).map((t) => t.tool as StudioTool)}
+                labels={toolLabels}
+                value={tool}
+                onChange={(t) => setTool(t)}
+              />
+            )}
 
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: embedded ? 0 : 14 }}>
               <Field label="Model">
                 <select
                   className="input"
@@ -873,7 +886,8 @@ export default function Studio() {
             </div>
           </Card>
 
-          {/* Runs list */}
+          {/* Runs live in Library when Studio is embedded in Create. */}
+          {!embedded && (
           <div>
             <h3 className="section-title" style={{ marginBottom: 10 }}>
               Recent runs
@@ -973,7 +987,7 @@ export default function Studio() {
                               variant="primary"
                               onClick={() => {
                                 const p = run.output!.primary!;
-                                navigate("/editor", {
+                                navigate("/studio/scenes", {
                                   state: {
                                     preload: {
                                       path: p.storagePath,
@@ -999,6 +1013,7 @@ export default function Studio() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
