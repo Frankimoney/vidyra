@@ -27,6 +27,16 @@ def normalize_api_base(api_base: str) -> str:
     return base if base.endswith("/v2") else f"{base}/v2"
 
 
+def normalize_endpoint_id(endpoint_id: str) -> str:
+    """Accept either a bare id, a path fragment, or a full RunPod endpoint URL."""
+    value = (endpoint_id or "").strip().strip("/")
+    if "/" in value:
+        value = value.rsplit("/", 1)[-1]
+    if not value:
+        raise RunPodError("RUNPOD_ENDPOINT_ID is empty.")
+    return value
+
+
 class RunPodError(RuntimeError):
     def __init__(self, message: str, status: str | None = None):
         super().__init__(message)
@@ -57,6 +67,7 @@ def _request(url: str, api_key: str, payload: dict | None = None, timeout: int =
 def submit_run(api_base: str, api_key: str, endpoint_id: str, input_payload: dict) -> str:
     """Create a run on the serverless endpoint; returns the run id."""
     base = normalize_api_base(api_base)
+    endpoint_id = normalize_endpoint_id(endpoint_id)
     result = _request(f"{base}/{endpoint_id}/run", api_key, {"input": input_payload})
     run_id = result.get("id")
     if not run_id:
@@ -77,6 +88,7 @@ def run_sync(
     caller needs the result inline rather than an artifact callback.
     """
     base = normalize_api_base(api_base)
+    endpoint_id = normalize_endpoint_id(endpoint_id)
     return _request(
         f"{base}/{endpoint_id}/runsync",
         api_key,
@@ -87,6 +99,7 @@ def run_sync(
 
 def get_run_status(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> dict:
     base = normalize_api_base(api_base)
+    endpoint_id = normalize_endpoint_id(endpoint_id)
     result = _request(f"{base}/{endpoint_id}/status/{run_id}", api_key)
     if not result:
         raise RunPodError(f"RunPod returned an empty status for {run_id}")
@@ -101,6 +114,7 @@ def cancel_run(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> di
     """
     try:
         base = normalize_api_base(api_base)
+        endpoint_id = normalize_endpoint_id(endpoint_id)
         return _request(
             f"{base}/{endpoint_id}/cancel/{run_id}", api_key, {}, timeout=20
         )
