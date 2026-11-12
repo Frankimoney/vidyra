@@ -16,6 +16,17 @@ import urllib.error
 import urllib.request
 
 
+DEFAULT_API_BASE = "https://api.runpod.ai/v2"
+
+
+def normalize_api_base(api_base: str) -> str:
+    """Always produce a base ending in /v2, even if env omits or doubles it."""
+    base = (api_base or DEFAULT_API_BASE).strip().rstrip("/")
+    if not base:
+        return DEFAULT_API_BASE
+    return base if base.endswith("/v2") else f"{base}/v2"
+
+
 class RunPodError(RuntimeError):
     def __init__(self, message: str, status: str | None = None):
         super().__init__(message)
@@ -40,12 +51,13 @@ def _request(url: str, api_key: str, payload: dict | None = None, timeout: int =
             body = exc.read().decode()[:300]
         except Exception:
             pass
-        raise RunPodError(f"RunPod API {exc.code}: {body or exc.reason}")
+        raise RunPodError(f"RunPod API {exc.code}: {body or exc.reason} ({url})")
 
 
 def submit_run(api_base: str, api_key: str, endpoint_id: str, input_payload: dict) -> str:
     """Create a run on the serverless endpoint; returns the run id."""
-    result = _request(f"{api_base}/{endpoint_id}/run", api_key, {"input": input_payload})
+    base = normalize_api_base(api_base)
+    result = _request(f"{base}/{endpoint_id}/run", api_key, {"input": input_payload})
     run_id = result.get("id")
     if not run_id:
         raise RunPodError(f"RunPod did not return a run id: {result!r}")
@@ -64,8 +76,9 @@ def run_sync(
     Used by short deterministic tools such as Whisper transcription where the
     caller needs the result inline rather than an artifact callback.
     """
+    base = normalize_api_base(api_base)
     return _request(
-        f"{api_base}/{endpoint_id}/runsync",
+        f"{base}/{endpoint_id}/runsync",
         api_key,
         {"input": input_payload},
         timeout=timeout,
@@ -73,7 +86,8 @@ def run_sync(
 
 
 def get_run_status(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> dict:
-    result = _request(f"{api_base}/{endpoint_id}/runs/{run_id}", api_key)
+    base = normalize_api_base(api_base)
+    result = _request(f"{base}/{endpoint_id}/runs/{run_id}", api_key)
     if not result:
         raise RunPodError(f"RunPod returned an empty status for {run_id}")
     return result
@@ -86,8 +100,9 @@ def cancel_run(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> di
     stops billing instead of finishing work nobody will collect.
     """
     try:
+        base = normalize_api_base(api_base)
         return _request(
-            f"{api_base}/{endpoint_id}/cancel/{run_id}", api_key, {}, timeout=20
+            f"{base}/{endpoint_id}/cancel/{run_id}", api_key, {}, timeout=20
         )
     except RunPodError:
         # A run that already finished/expired can't be cancelled; the caller
