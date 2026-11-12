@@ -185,8 +185,6 @@ def _normalize_scenes(data, characters, issues):
         issues.append("At least one scene is required (field `scenes`).")
         return []
     total = len(scenes_raw)
-    if total < 2:
-        issues.append("A production package needs at least 2 scenes.")
     if total > settings.film_max_scenes:
         issues.append(f"Too many scenes ({total} > {settings.film_max_scenes}).")
     scenes = []

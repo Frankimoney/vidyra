@@ -192,8 +192,8 @@ export default function DirectorRoom(props: Props) {
 
   async function approve() {
     if (!project || !draft) return;
-    if (draft.scenes.length < 2) {
-      toast("A film needs at least 2 scenes.", "error");
+    if (draft.scenes.length < 1) {
+      toast("Add at least one scene before filming.", "error");
       return;
     }
     setRendering(true);
@@ -263,10 +263,10 @@ export default function DirectorRoom(props: Props) {
         setError("The Director didn't return a plan yet. Review the questions below and try again.");
         return;
       }
-      if (plan.scenes.length < 2) {
+      if (plan.scenes.length < 1) {
         adopt(next);
         setDraft(plan);
-        setError("A film needs at least 2 scenes. Add another scene to the plan.");
+        setError("The plan has no scenes yet. Add one before filming.");
         return;
       }
 

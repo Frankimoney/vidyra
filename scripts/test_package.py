@@ -229,7 +229,7 @@ def test_validate_endpoint():
         r2 = client.post("/api/films/validate-package", headers=H,
                          json={"text": json.dumps(bad)})
         b2 = r2.json()
-        check("too-few-scenes flagged", b2.get("valid") is False and any("at least 2" in i.lower() for i in b2.get("issues", [])),
+        check("single-scene package allowed", b2.get("valid") is True,
               str(b2.get("issues")))
 
         r3 = client.post("/api/films/validate-package", headers=H, json={"text": TEXT_PACKAGE})
