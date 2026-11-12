@@ -11,6 +11,10 @@ on:
           - studio
           - pipeline
         default: both
+  push:
+    branches: [main]
+    paths:
+      - deploy/runpod/pipeline-image-rev
 
 permissions:
   contents: read
@@ -23,7 +27,7 @@ concurrency:
 jobs:
   pipeline:
     name: Build pipeline image
-    if: ${{ github.event.inputs.target != 'studio' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.target != 'studio' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -57,14 +61,16 @@ jobs:
           file: deploy/runpod/pipeline.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/frankimoney/vidyra-pipeline:latest
+          tags: |
+            ghcr.io/frankimoney/vidyra-pipeline:latest
+            ghcr.io/frankimoney/vidyra-pipeline:${{ github.sha }}
           no-cache: true
           provenance: false
           sbom: false
 
   studio:
     name: Build studio image
-    if: ${{ github.event.inputs.target != 'pipeline' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target != 'pipeline' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
