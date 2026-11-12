@@ -98,6 +98,8 @@ _PLAN_SYSTEM = (
     "Rules:\n"
     "- Honour the brief exactly: its tone, length, style and characters. Do not "
     "wander into a different story.\n"
+    "- Return at least 2 scenes. If the brief is short, split it into a setup "
+    "and a payoff rather than writing one scene.\n"
     "- Every scene needs a `setting` and either narration or dialogue.\n"
     "- Only characters declared in `characters` may speak.\n"
     "- Keep narration to 1-3 sentences per scene so the film stays watchable.\n"
@@ -213,9 +215,33 @@ def _draft_plan(brief: dict, aspect: str, history: list) -> dict:
     messages = [*history, {"role": "user", "content": user}]
     data = _call(system, messages, timeout=max(90, settings.gemini_timeout_seconds))
 
-    # Raises PackageError if the model broke the contract; the caller turns
-    # that into a 422 with the issues so the user can ask for another draft.
-    return package_service.normalize_package(data)
+    try:
+        return package_service.normalize_package(data)
+    except package_service.PackageError as exc:
+        # A one-scene draft is a common model miss for very short prompts. It
+        # is a drafting error, not something the creator should have to debug,
+        # so ask once for a split version before surfacing the issue.
+        if not any("at least 2 scenes" in issue for issue in exc.issues):
+            raise
+        retry_messages = [
+            *messages,
+            {"role": "assistant", "content": json.dumps(data, ensure_ascii=False)},
+            {
+                "role": "user",
+                "content": (
+                    "That draft has only one scene. Return the full production "
+                    "package again with at least 2 scenes: a setup and a payoff, "
+                    "each with its own setting and shot."
+                ),
+            },
+        ]
+        retry = _call(
+            system,
+            retry_messages,
+            timeout=max(90, settings.gemini_timeout_seconds),
+        )
+        # The caller still turns a second failure into a clear 422.
+        return package_service.normalize_package(retry)
 
 
 def plan_to_outline_json(plan: dict) -> str:

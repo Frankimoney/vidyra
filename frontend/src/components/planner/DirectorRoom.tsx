@@ -140,7 +140,12 @@ export default function DirectorRoom(props: Props) {
       setInput("");
       adopt(r.project);
     } catch (e) {
-      setError((e as Error).message || "Could not start the session.");
+      const message = (e as Error).message || "Could not start the session.";
+      setError(
+        message.includes("at least 2 scenes")
+          ? "The Director came back with a one-scene draft. Try again — it will ask for a split plan."
+          : message
+      );
     } finally {
       setStarting(false);
     }
