@@ -31,10 +31,12 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI \
     && cd /ComfyUI \
     && git checkout --quiet "$COMFYUI_REF" \
     && test -f comfy_extras/nodes_wan.py \
-    && for node in WanImageToVideo WanFirstLastFrameToVideo WanCameraEmbedding WanCameraImageToVideo; do \
+    && test -f comfy_extras/nodes_camera_trajectory.py \
+    && for node in WanImageToVideo WanFirstLastFrameToVideo WanCameraImageToVideo; do \
          grep -q "node_id=\"$node\"" comfy_extras/nodes_wan.py \
          || { echo "FATAL: pinned ComfyUI is missing $node"; exit 1; }; \
        done \
+    && grep -q 'node_id="WanCameraEmbedding"' comfy_extras/nodes_camera_trajectory.py \
     && echo "ComfyUI $(git rev-parse --short HEAD): Wan nodes present" \
     && pip install --no-cache-dir -r requirements.txt
 
