@@ -1044,16 +1044,37 @@ export default function Studio({
                       </div>
                     )}
 
-                    {run.status === "failed" && run.error && (
-                      <div
-                        style={{
-                          marginTop: 10,
-                          fontSize: "0.84rem",
-                          color: "var(--danger, #f87171)",
-                          whiteSpace: "pre-wrap",
-                        }}
-                      >
-                        {run.error}
+                    {(run.status === "failed" || run.status === "cancelled") && (
+                      <div style={{ marginTop: 10 }}>
+                        {run.error && (
+                          <div
+                            style={{
+                              fontSize: "0.84rem",
+                              color:
+                                run.status === "cancelled"
+                                  ? "var(--text-3)"
+                                  : "var(--danger, #f87171)",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {run.error}
+                          </div>
+                        )}
+                        <div style={{ marginTop: 8, textAlign: "right" }}>
+                          <button
+                            type="button"
+                            onClick={() => removeRun(run.run_id)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "var(--text-3)",
+                              cursor: "pointer",
+                              fontSize: "0.84rem",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     )}
 

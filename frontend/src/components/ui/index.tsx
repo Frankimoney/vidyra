@@ -83,13 +83,14 @@ export function Toggle({
 export function Badge({
   status,
 }: {
-  status: "queued" | "processing" | "completed" | "failed";
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled";
 }) {
-  const dots = {
+  const dots: Record<string, ReactNode> = {
     completed: <span style={{ color: "var(--success)" }}>●</span>,
     processing: <span className="pulse" style={{ color: "var(--accent)" }}>●</span>,
     queued: <span style={{ color: "var(--warning)" }}>●</span>,
     failed: <span style={{ color: "var(--danger)" }}>●</span>,
+    cancelled: <span style={{ color: "var(--text-3)" }}>●</span>,
   };
   return (
     <span className={`badge badge-${status}`}>

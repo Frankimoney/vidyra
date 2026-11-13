@@ -1,6 +1,6 @@
 /* ---------- Shared domain types ---------- */
 
-export type JobStatus = "queued" | "processing" | "completed" | "failed";
+export type JobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
 
 /** Shared render effort preset: fewer steps for drafts, more for finals. */
 export type VideoQuality = "draft" | "standard" | "high";
