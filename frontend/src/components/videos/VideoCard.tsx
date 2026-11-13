@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../services/api";
+import { sceneProgress } from "../../services/jobs";
 import { useConfirm, useToast } from "../feedback";
 import { Badge, ProgressBar } from "../ui";
 import type { JobItem } from "../../types";
@@ -148,6 +149,7 @@ export function VideoCard({
   // away and back.
   const done = job.status === "completed" && !!(job.output?.url || src);
   const playable = job.output?.url || src;
+  const scene = sceneProgress(job);
 
   async function refresh() {
     try {
@@ -216,6 +218,18 @@ export function VideoCard({
                 <span style={{ fontSize: "0.72rem", color: "var(--accent)" }}>{job.progress}%</span>
               </div>
               <ProgressBar value={job.progress} />
+              {scene.label && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                    color: "var(--text-3)",
+                  }}
+                >
+                  {scene.label}
+                </div>
+              )}
             </div>
           )}
         </div>

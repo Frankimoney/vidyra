@@ -738,6 +738,8 @@ class FilmWorker:
                 stage="filming",
                 progress=base,
                 message=f"Generating visuals for scene {i + 1} of {n}",
+                scene=i + 1,
+                scene_count=n,
             )
 
             image_prompt = (sc.get("setting") or "")[:1500]
@@ -1251,6 +1253,8 @@ class FilmWorker:
                 stage="filming",
                 progress=45 + int(45 * i / n),
                 message=f"Recording turn {i + 1} of {n} · {speaker}",
+                scene=i + 1,
+                scene_count=n,
             )
 
             # Voice the line so lip-sync can animate from it.
@@ -1503,9 +1507,25 @@ class FilmWorker:
             raise FilmError("Not a film job.")
         return job
 
-    def _report(self, job_id: str, stage: str, progress, message: str):
-        """Progress may be None → keep whatever the job already shows."""
+    def _report(
+        self,
+        job_id: str,
+        stage: str,
+        progress,
+        message: str,
+        scene: int | None = None,
+        scene_count: int | None = None,
+    ):
+        """Progress may be None → keep whatever the job already shows.
+
+        ``scene``/``scene_count`` mark which storyboard scene is being filmed so
+        the UI can show "Scene 3 of 8" instead of a bare progress bar.
+        """
         kwargs = {"status": "processing", "stage": stage, "message": message or stage}
         if progress is not None:
             kwargs["progress"] = progress
+        if scene is not None:
+            kwargs["sceneIndex"] = scene
+        if scene_count is not None:
+            kwargs["sceneCount"] = scene_count
         jobs_service.update_job(job_id, **kwargs)

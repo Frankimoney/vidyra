@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useJob } from "../hooks/useJobs";
+import { sceneProgress } from "../services/jobs";
 import { api } from "../services/api";
 import { copyText, useConfirm, useToast } from "../components/feedback";
 import { FaceRecorder } from "../components/completed/FaceRecorder";
@@ -154,10 +155,12 @@ function ProcessingView({
   jobId,
   stage,
   progress,
+  sceneLabel,
 }: {
   jobId: string;
   stage: string;
   progress: number;
+  sceneLabel?: string | null;
 }) {
   const current = stageIndex(stage);
   const [cancelling, setCancelling] = useState(false);
@@ -189,7 +192,9 @@ function ProcessingView({
         <Spinner />
         <h2 style={{ margin: "18px 0 6px" }}>Generating your video…</h2>
         <p className="muted" style={{ margin: 0, fontSize: "0.92rem" }}>
-          This usually takes a minute or two.
+          {sceneLabel
+            ? `${sceneLabel} — this can take a few minutes.`
+            : "This usually takes a minute or two."}
         </p>
         <div style={{ margin: "22px 0 6px" }}>
           <ProgressBar value={progress} />
@@ -569,9 +574,15 @@ export default function JobStatus() {
   }
 
   const filmPlot = (job as any).filmPlot;
+  const scene = sceneProgress(job);
   return (
     <>
-      <ProcessingView jobId={job.jobId} stage={job.stage} progress={job.progress} />
+      <ProcessingView
+        jobId={job.jobId}
+        stage={job.stage}
+        progress={job.progress}
+        sceneLabel={scene.label}
+      />
       <DirectorNotes filmPlot={filmPlot} settings={(job as any).settings} />
     </>
   );

@@ -55,6 +55,14 @@ export interface JobItem {
   type?: "video" | "face";
   parentJobId?: string;
   filmPlot?: any;
+  film?: {
+    scenes_count?: number;
+    outline?: { scenes?: unknown[] };
+  };
+  /** Which storyboard scene the worker is filming right now (1-based). */
+  sceneIndex?: number;
+  /** Total scenes in this film, reported by the worker. */
+  sceneCount?: number;
   timeline?: TimelineTracks;
   workspaceId?: string;
   status: JobStatus;

@@ -71,3 +71,31 @@ export function watchJobs(
     onList(jobs);
   });
 }
+
+/**
+ * Human label for how many scenes a film has and which one is filming now.
+ *
+ * Total is read from the written outline first (most accurate), then the
+ * requested count on the film, then the worker-reported count. The current
+ * index only exists once the worker starts filming each scene. Returns null
+ * for non-film jobs (storyboard/face) so callers can skip the chip.
+ */
+export function sceneProgress(job: JobItem): {
+  index: number | null;
+  total: number | null;
+  label: string | null;
+} {
+  const outlineScenes = job.filmPlot?.scenes;
+  const fromOutline =
+    Array.isArray(outlineScenes) && outlineScenes.length ? outlineScenes.length : 0;
+  const total =
+    fromOutline ||
+    (job.film?.outline?.scenes?.length ?? 0) ||
+    (job.film?.scenes_count ?? 0) ||
+    (job.sceneCount ?? 0);
+  const index = job.sceneIndex && job.sceneIndex > 0 ? job.sceneIndex : null;
+  if (!total) return { index, total: null, label: null };
+  if (total <= 1) return { index, total, label: "Single scene" };
+  if (index) return { index, total, label: `Scene ${index} of ${total}` };
+  return { index, total, label: `${total} scenes` };
+}
