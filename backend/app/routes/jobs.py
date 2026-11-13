@@ -500,6 +500,21 @@ async def delete_job(
     if job.get("userId") != user.uid:
         raise HTTPException(status_code=403, detail="Not your job.")
 
+    s: Settings = request.app.state.settings
+    # Deleting a stuck job must also stop its GPU work, or the RunPod job keeps
+    # billing after the document is gone.
+    _cancel_runpod_run(s, s.runpod_pipeline_endpoint_id, job.get("runpodRunId") or "")
+    for run in studio_service.list_active_runs(user.uid):
+        _cancel_runpod_run(s, s.studio_endpoint_id, run.get("runpodRunId") or "")
+        studio_service.update_run(
+            run.get("runId"),
+            status="cancelled",
+            stage="cancelled",
+            progress=100,
+            message="Cancelled",
+            error="Cancelled by you.",
+        )
+
     storage = request.app.state.storage
 
     # Only delete this job's own artifacts (finished video + poster). The

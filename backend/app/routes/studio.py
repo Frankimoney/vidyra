@@ -453,6 +453,16 @@ async def delete_studio_run(
     if run.get("userId") != user.uid:
         raise HTTPException(status_code=403, detail="Not your run.")
 
+    s: Settings = request.app.state.settings
+    runpod_run_id = run.get("runpodRunId") or ""
+    if s.runpod_api_key and s.studio_endpoint_id and runpod_run_id:
+        try:
+            runpod_client.cancel_run(
+                s.runpod_api_base, s.runpod_api_key, s.studio_endpoint_id, runpod_run_id
+            )
+        except Exception:
+            pass
+
     storage = request.app.state.storage
     output = run.get("output") or {}
     for artifact in output.get("artifacts") or []:
