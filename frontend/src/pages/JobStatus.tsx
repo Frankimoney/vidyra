@@ -2,7 +2,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useJob } from "../hooks/useJobs";
 import { api } from "../services/api";
-import { copyText, useToast } from "../components/feedback";
+import { copyText, useConfirm, useToast } from "../components/feedback";
 import { FaceRecorder } from "../components/completed/FaceRecorder";
 import {
   Button,
@@ -150,8 +150,39 @@ function DirectorNotes({ filmPlot, settings }: { filmPlot: any; settings?: any }
   );
 }
 
-function ProcessingView({ stage, progress }: { stage: string; progress: number }) {
+function ProcessingView({
+  jobId,
+  stage,
+  progress,
+}: {
+  jobId: string;
+  stage: string;
+  progress: number;
+}) {
   const current = stageIndex(stage);
+  const [cancelling, setCancelling] = useState(false);
+  const confirm = useConfirm();
+  const toast = useToast();
+
+  async function cancel() {
+    const ok = await confirm({
+      title: "Stop this render?",
+      message:
+        "The GPU job will be cancelled and any AI Studio runs it started will be stopped. You can start again anytime.",
+      confirmLabel: "Stop render",
+      danger: true,
+    });
+    if (!ok) return;
+    setCancelling(true);
+    try {
+      await api.cancelJob(jobId);
+      toast("Render cancelled.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Could not cancel.", "error");
+      setCancelling(false);
+    }
+  }
+
   return (
     <div className="stack-v fade-up" style={{ paddingTop: 30 }}>
       <div className="card" style={{ textAlign: "center" }}>
@@ -168,6 +199,11 @@ function ProcessingView({ stage, progress }: { stage: string; progress: number }
             Stage: {STAGES[current]?.label ?? stage}
           </span>
           <span style={{ fontWeight: 700, color: "var(--accent)" }}>{progress}%</span>
+        </div>
+        <div style={{ marginTop: 18 }}>
+          <Button variant="ghost" onClick={cancel} disabled={cancelling}>
+            {cancelling ? "Stopping…" : "Stop render"}
+          </Button>
         </div>
       </div>
 
@@ -535,7 +571,7 @@ export default function JobStatus() {
   const filmPlot = (job as any).filmPlot;
   return (
     <>
-      <ProcessingView stage={job.stage} progress={job.progress} />
+      <ProcessingView jobId={job.jobId} stage={job.stage} progress={job.progress} />
       <DirectorNotes filmPlot={filmPlot} settings={(job as any).settings} />
     </>
   );

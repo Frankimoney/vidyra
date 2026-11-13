@@ -1387,7 +1387,8 @@ class FilmWorker:
                     pa["cfg"] = 5.0
 
             run_id = studio_service.create_run(
-                uid=uid, tool=tool, model=model, prompt=p, params=pa, refs=refs, title=title,
+                uid=uid, tool=tool, model=model, prompt=p, params=pa, refs=refs,
+                title=title, job_id=job_id,
             )
             self.studio_worker._process(run_id)  # sync, so same thread waits for the artifact
             doc = studio_service.get_run(run_id) or {}

@@ -18,6 +18,8 @@ from ..config import Settings
 from ..models import CreateOut, JobCreate, JobOut, TitleIn
 from ..services import jobs as jobs_service
 from ..services import profiles
+from ..services import runpod as runpod_client
+from ..services import studio as studio_service
 from ..services import workspaces as workspace_service
 from ..services.ratelimit import rate_limiter
 from ..services.shares import create_share_token
@@ -514,6 +516,61 @@ async def delete_job(
                 pass
 
     jobs_service.delete_job(job_id)
+
+
+def _cancel_runpod_run(settings: Settings, endpoint_id: str, run_id: str) -> None:
+    """Best-effort cancel of one RunPod job so a stuck render stops billing."""
+    if not (settings.runpod_api_key and endpoint_id and run_id):
+        return
+    try:
+        runpod_client.cancel_run(
+            settings.runpod_api_base,
+            settings.runpod_api_key,
+            endpoint_id,
+            run_id,
+        )
+    except Exception:
+        pass
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Stop a queued/processing render and any Studio runs it started."""
+    job = jobs_service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.get("userId") != user.uid:
+        raise HTTPException(status_code=403, detail="Not your job.")
+    if job.get("status") in ("completed", "failed", "cancelled"):
+        return {"status": job.get("status")}
+
+    s: Settings = request.app.state.settings
+    _cancel_runpod_run(s, s.runpod_pipeline_endpoint_id, job.get("runpodRunId") or "")
+
+    for run in studio_service.list_active_runs(user.uid, job_id):
+        _cancel_runpod_run(s, s.studio_endpoint_id, run.get("runpodRunId") or "")
+        studio_service.update_run(
+            run.get("runId"),
+            status="cancelled",
+            stage="cancelled",
+            progress=100,
+            message="Cancelled",
+            error="Cancelled by you.",
+        )
+
+    jobs_service.update_job(
+        job_id,
+        status="cancelled",
+        stage="cancelled",
+        progress=0,
+        message="Cancelled",
+        error="Cancelled by you.",
+    )
+    return {"status": "cancelled"}
 
 
 @router.post("/jobs/{job_id}/face", status_code=status.HTTP_201_CREATED)

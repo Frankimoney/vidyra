@@ -22,6 +22,7 @@ from ..config import Settings
 from ..models import StudioRunCreate
 from ..services import imagebrief
 from ..services import ratelimit
+from ..services import runpod as runpod_client
 from ..services import studio as studio_service
 from ..services import usage as usage_service
 from ..services.ratelimit import rate_limiter
@@ -407,6 +408,39 @@ async def get_studio_run(
     if run.get("userId") != user.uid:
         raise HTTPException(status_code=403, detail="Not your run.")
     return _run_out(run, run_id=run_id)
+
+
+@router.post("/studio/runs/{run_id}/cancel")
+async def cancel_studio_run(
+    run_id: str, request: Request, user: CurrentUser = Depends(get_current_user)
+):
+    """Stop a queued/processing Studio run and its RunPod job."""
+    run = studio_service.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.get("userId") != user.uid:
+        raise HTTPException(status_code=403, detail="Not your run.")
+    if (run.get("status") or "") in ("completed", "failed", "cancelled"):
+        return {"status": run.get("status")}
+
+    s: Settings = request.app.state.settings
+    runpod_run_id = run.get("runpodRunId") or ""
+    if s.runpod_api_key and s.studio_endpoint_id and runpod_run_id:
+        try:
+            runpod_client.cancel_run(
+                s.runpod_api_base, s.runpod_api_key, s.studio_endpoint_id, runpod_run_id
+            )
+        except Exception:
+            pass
+    studio_service.update_run(
+        run_id,
+        status="cancelled",
+        stage="cancelled",
+        progress=100,
+        message="Cancelled",
+        error="Cancelled by you.",
+    )
+    return {"status": "cancelled"}
 
 
 @router.delete("/studio/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

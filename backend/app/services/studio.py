@@ -38,6 +38,7 @@ def create_run(
     params: dict,
     refs: list,
     title: str = "",
+    job_id: str = "",
 ) -> str:
     run_id = uuid.uuid4().hex[:16]
     now = _now_stamp()
@@ -49,6 +50,7 @@ def create_run(
         "params": params or {},
         "refs": refs or [],
         "title": title or f"AI {tool}",
+        "jobId": job_id or "",
         "status": "queued",
         "stage": "queued",
         "progress": 0,
@@ -89,6 +91,17 @@ def get_run(run_id: str) -> dict | None:
     if not snap.exists:
         return None
     return snap.to_dict()
+
+
+def list_active_runs(uid: str, job_id: str = "") -> list:
+    """Runs that are still queued/processing, optionally for one job."""
+    items = list_runs(uid, limit=200)
+    return [
+        r
+        for r in items
+        if (r.get("status") or "") in ("queued", "processing")
+        and (not job_id or r.get("jobId") == job_id)
+    ]
 
 
 def list_runs(uid: str, limit: int = 30) -> list:

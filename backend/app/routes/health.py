@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from ..models import HealthOut
 from ..services.firebase import firebase
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 router = APIRouter()
 

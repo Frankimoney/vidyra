@@ -17,6 +17,62 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+function StopButton({ job }: { job: JobItem }) {
+  const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
+  const toast = useToast();
+
+  async function stop() {
+    const ok = await confirm({
+      title: "Stop this render?",
+      message: "The GPU job will be cancelled and any AI Studio runs it started will be stopped.",
+      confirmLabel: "Stop render",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.cancelJob(job.jobId);
+      toast("Render cancelled.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Could not cancel.", "error");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      style={{
+        position: "absolute",
+        top: 8,
+        left: 8,
+        zIndex: 3,
+        padding: "7px 10px",
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,0.22)",
+        background: "rgba(10,10,14,0.72)",
+        color: "#fff",
+        fontSize: "0.78rem",
+        fontWeight: 700,
+        cursor: "pointer",
+        lineHeight: 1,
+        boxShadow: "0 2px 10px rgba(0,0,0,0.35)",
+        backdropFilter: "blur(2px)",
+      }}
+      title="Stop render"
+      disabled={busy}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        stop();
+      }}
+    >
+      {busy ? "…" : "Stop"}
+    </button>
+  );
+}
+
 function DeleteButton({ job }: { job: JobItem }) {
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
@@ -106,6 +162,9 @@ export function VideoCard({
     <Link to={`/job/${job.jobId}`} style={{ textDecoration: "none", display: "block" }}>
       <div>
         <div className="thumb">
+          {showDelete && (job.status === "processing" || job.status === "queued") && (
+            <StopButton job={job} />
+          )}
           {showDelete && <DeleteButton job={job} />}
           {done ? (
             job.output?.posterUrl ? (

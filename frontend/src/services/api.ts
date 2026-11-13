@@ -569,6 +569,10 @@ export const api = {
     request<{ url: string; token: string; pageUrl: string }>(`/jobs/${encodeURIComponent(jobId)}/share-url`),
   deleteJob: (jobId: string) =>
     request<void>(`/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }),
+  cancelJob: (jobId: string) =>
+    request<{ status: string }>(`/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+    }),
   renameJob: (jobId: string, title: string) =>
     request<{ title: string }>(`/jobs/${encodeURIComponent(jobId)}/title`, {
       method: "PATCH",
@@ -611,6 +615,10 @@ export const api = {
     request<StudioRun>(`/studio/runs/${encodeURIComponent(runId)}`),
   deleteStudioRun: (runId: string) =>
     request<void>(`/studio/runs/${encodeURIComponent(runId)}`, { method: "DELETE" }),
+  cancelStudioRun: (runId: string) =>
+    request<{ status: string }>(`/studio/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+    }),
 };
 
 export const publicApi = {

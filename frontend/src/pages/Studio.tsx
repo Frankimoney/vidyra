@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import { watchStudioRuns } from "../services/studioJobs";
 import { useAuth } from "../contexts/AuthContext";
-import { useToast } from "../components/feedback";
+import { useConfirm, useToast } from "../components/feedback";
 import { Badge, Button, Card, EmptyState, Field, Segmented, Spinner } from "../components/ui";
 import { AssetPicker } from "../components/AssetPicker";
 import CharacterMentions from "../components/CharacterMentions";
@@ -512,7 +512,28 @@ export default function Studio({
 } = {}) {
   const { uid } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const navigate = useNavigate();
+  const [cancellingRun, setCancellingRun] = useState<string | null>(null);
+
+  async function cancelRun(runId: string) {
+    const ok = await confirm({
+      title: "Stop this AI run?",
+      message: "The GPU job will be cancelled so it stops billing.",
+      confirmLabel: "Stop run",
+      danger: true,
+    });
+    if (!ok) return;
+    setCancellingRun(runId);
+    try {
+      await api.cancelStudioRun(runId);
+      toast("Run cancelled.", "success");
+    } catch (e) {
+      toast((e as Error).message || "Could not cancel run.", "error");
+    } finally {
+      setCancellingRun(null);
+    }
+  }
 
   const [catalog, setCatalog] = useState<StudioCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -1007,8 +1028,19 @@ export default function Studio({
                     </div>
 
                     {(run.status === "processing" || run.status === "queued") && (
-                      <div className="progress-track" style={{ marginTop: 10 }}>
-                        <div className="progress-fill" style={{ width: `${run.progress}%` }} />
+                      <div style={{ marginTop: 10 }}>
+                        <div className="progress-track">
+                          <div className="progress-fill" style={{ width: `${run.progress}%` }} />
+                        </div>
+                        <div style={{ marginTop: 8, textAlign: "right" }}>
+                          <Button
+                            variant="ghost"
+                            onClick={() => cancelRun(run.run_id)}
+                            disabled={cancellingRun === run.run_id}
+                          >
+                            {cancellingRun === run.run_id ? "Stopping…" : "Stop"}
+                          </Button>
+                        </div>
                       </div>
                     )}
 

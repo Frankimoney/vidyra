@@ -498,6 +498,7 @@ class VideoWorker:
             params={"lines": list(texts)},
             refs=[{"path": ref, "role": "audio"}],
             title=f"{label} · cloned voice",
+            job_id=job_id,
         )
         self.studio_worker._process(run_id)
         doc = studio_service.get_run(run_id) or {}
