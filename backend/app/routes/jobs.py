@@ -551,7 +551,10 @@ async def cancel_job(
     s: Settings = request.app.state.settings
     _cancel_runpod_run(s, s.runpod_pipeline_endpoint_id, job.get("runpodRunId") or "")
 
-    for run in studio_service.list_active_runs(user.uid, job_id):
+    # Cancel every active Studio run for this user: the pipeline worker's
+    # nested Studio jobs may predate the jobId link, and a leftover GPU job
+    # would keep billing after the pipeline run is killed.
+    for run in studio_service.list_active_runs(user.uid):
         _cancel_runpod_run(s, s.studio_endpoint_id, run.get("runpodRunId") or "")
         studio_service.update_run(
             run.get("runId"),
