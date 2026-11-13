@@ -125,7 +125,7 @@ class StudioWorker:
 
         payload = self._build_payload(run_id, run)
         api_base = self.settings.runpod_api_base.rstrip("/")
-        endpoint = self.settings.runpod_endpoint_id.strip()
+        endpoint = self.settings.studio_endpoint_id
 
         runpod_run_id = runpod_client.submit_run(
             api_base, self.settings.runpod_api_key, endpoint, payload

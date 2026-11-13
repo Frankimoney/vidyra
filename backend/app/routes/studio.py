@@ -371,7 +371,7 @@ async def create_studio_run(
 
     if s.runpod_fake:
         return {"run_id": run_id, "status": "queued", "fake": True}
-    return {"run_id": run_id, "status": "queued", "endpoint": s.runpod_endpoint_id}
+    return {"run_id": run_id, "status": "queued", "endpoint": s.studio_endpoint_id}
 
 
 

@@ -94,7 +94,11 @@ class Settings:
 
     # RunPod serverless GPU (AI Studio)
     runpod_api_key: str = os.getenv("RUNPOD_API_KEY", "")
+    # Studio (diffusion/ComfyUI) endpoint. On the pipeline worker RunPod sets
+    # RUNPOD_ENDPOINT_ID to the *current* endpoint, so the pipeline image must
+    # read the Studio id from RUNPOD_STUDIO_ENDPOINT_ID instead.
     runpod_endpoint_id: str = os.getenv("RUNPOD_ENDPOINT_ID", "")
+    runpod_studio_endpoint_id: str = os.getenv("RUNPOD_STUDIO_ENDPOINT_ID", "")
     runpod_pipeline_endpoint_id: str = os.getenv("RUNPOD_PIPELINE_ENDPOINT_ID", "")
     runpod_api_base: str = os.getenv("RUNPOD_API_BASE", "https://api.runpod.ai/v2")
     runpod_fake: bool = _bool(os.getenv("RUNPOD_FAKE"), False)
@@ -137,8 +141,12 @@ class Settings:
         return bool(self.gemini_api_key)
 
     @property
+    def studio_endpoint_id(self) -> str:
+        return (self.runpod_studio_endpoint_id or self.runpod_endpoint_id).strip()
+
+    @property
     def runpod_enabled(self) -> bool:
-        return bool(self.runpod_api_key and self.runpod_endpoint_id)
+        return bool(self.runpod_api_key and self.studio_endpoint_id)
 
     @property
     def remote_pipeline(self) -> bool:

@@ -1,1 +1,2 @@
 2026-11-13: rebuild pipeline for RunPod /status polling fix
+2026-11-13: pipeline worker must read RUNPOD_STUDIO_ENDPOINT_ID

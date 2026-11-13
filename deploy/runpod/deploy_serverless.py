@@ -330,7 +330,7 @@ def main() -> int:
         "SIGNED_URL_SECRET": signed_url_secret,
         "WHISPER_BACKEND": "runpod",
         "RUNPOD_API_KEY": api_key,
-        "RUNPOD_ENDPOINT_ID": studio_endpoint_id,
+        "RUNPOD_STUDIO_ENDPOINT_ID": studio_endpoint_id,
     }
     pipeline_env.update(local_firebase_env(env))
     pipeline_env.update(local_r2_env(env))

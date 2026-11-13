@@ -63,7 +63,7 @@ def make_transcriber(uid: str, workspace_id: str, storage, settings, job_id: str
             result = runpod_client.run_sync(
                 settings.runpod_api_base.rstrip("/"),
                 settings.runpod_api_key,
-                settings.runpod_endpoint_id.strip(),
+                settings.studio_endpoint_id,
                 {
                     "tool": "transcribe",
                     "model": settings.whisper_model or "base",
