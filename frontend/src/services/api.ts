@@ -215,6 +215,8 @@ export interface ProjectPlanScene {
   setting: string;
   shot: string;
   transition?: string;
+  /** Scene length in seconds (2-8); null/undefined uses the model default. */
+  duration?: number | null;
 }
 
 export interface ProjectPlan {

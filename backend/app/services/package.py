@@ -187,6 +187,17 @@ def _split_dialogue(raw, characters):
     return narration, dialogue
 
 
+def _scene_duration(value):
+    """Scene length in seconds (2-8), or None to use the model default."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return round(max(2.0, min(8.0, seconds)), 2)
+
+
 def _normalize_scenes(data, characters, issues):
     scenes_raw = data.get("scenes") or []
     if not isinstance(scenes_raw, list):
@@ -226,6 +237,8 @@ def _normalize_scenes(data, characters, issues):
             "setting": setting,
             "shot": shot,
             "transition": str(s.get("transition", "") or ""),
+            # Creator-chosen scene length (seconds); None = model default (~5s).
+            "duration": _scene_duration(s.get("duration")),
             # A creator-selected take (Studio image) can replace generation.
             "reference_image": str(s.get("reference_image", "") or ""),
         })

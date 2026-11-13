@@ -61,6 +61,28 @@ _DEFAULT_VIDEO_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16, "
 DEFAULT_FILM_ASPECT = "9:16"
 
 
+def _scene_frames(duration, fps: int, default: int) -> int:
+    """Convert a per-scene length in seconds to a Wan-valid frame count.
+
+    Wan image-to-video models require ``4n+1`` frames; snap up to the nearest
+    valid count and clamp to a 2-8s window so a bad value can't blow up VRAM.
+    Returns ``default`` when no duration was chosen.
+    """
+    try:
+        seconds = float(duration)
+    except (TypeError, ValueError):
+        return default
+    if seconds <= 0:
+        return default
+    seconds = max(2.0, min(8.0, seconds))
+    frames = int(round(seconds * max(1, int(fps or 16))))
+    frames = max(33, min(129, frames))
+    remainder = (frames - 1) % 4
+    if remainder:
+        frames += 4 - remainder
+    return frames
+
+
 def _shape(params: dict, aspect: str) -> dict:
     """Re-shape one generated run's params to the film's aspect ratio.
 
@@ -826,7 +848,9 @@ class FilmWorker:
                     tool="img2video",
                     model=video_model,
                     prompt=shot_prompt,
-                    params=self._video_params(video_model, sc.get("shot")),
+                    params=self._video_params(
+                        video_model, sc.get("shot"), sc.get("duration")
+                    ),
                     refs=[{"path": image_path, "role": "image"}],
                     title=f"Film · Scene {i + 1} of {n}",
                 )
@@ -915,10 +939,14 @@ class FilmWorker:
             job_id, job, storyboard_scenes, all_media, default_voice, work_dir, clone_banks
         )
 
-    def _video_params(self, video_model: str, shot_text: str = "") -> dict:
+    def _video_params(self, video_model: str, shot_text: str = "", duration=None) -> dict:
         """Per-model img2video params. For the Wan2.2 camera-control model the
-        scene's own camera move is stamped in as an explicit trajectory."""
+        scene's own camera move is stamped in as an explicit trajectory. A
+        per-scene ``duration`` (seconds) overrides the default frame count."""
         params = dict(_VIDEO_PARAMS.get(video_model, _DEFAULT_VIDEO_PARAMS))
+        params["frames"] = _scene_frames(
+            duration, params.get("fps", 16), params.get("frames", 81)
+        )
         if video_model == "wan22-cam-i2v":
             pose, speed = _camera_params(shot_text)
             params["camera_pose"] = pose
@@ -1060,7 +1088,9 @@ class FilmWorker:
             job_id, uid,
             tool="img2video", model=video_model,
             prompt=motion_prompt,
-            params=self._video_params(video_model, sc.get("shot")),
+            params=self._video_params(
+                video_model, sc.get("shot"), sc.get("duration")
+            ),
             refs=[{"path": frame_path, "role": "image"}],
             title=acting_title, on_retry=on_retry,
         )

@@ -262,6 +262,8 @@ def plan_to_outline_json(plan: dict) -> str:
             entry["dialogue"] = scene["dialogue"]
         if scene.get("transition"):
             entry["transition"] = scene["transition"]
+        if scene.get("duration"):
+            entry["duration"] = scene["duration"]
         scenes.append(entry)
     payload = {
         "title": plan.get("title", "Untitled Film"),

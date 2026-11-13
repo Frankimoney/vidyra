@@ -728,7 +728,7 @@ export default function DirectorRoom(props: Props) {
                     ...p,
                     scenes: [
                       ...p.scenes,
-                      { narration: "", dialogue: {}, setting: "", shot: "", transition: "" },
+                      { narration: "", dialogue: {}, setting: "", shot: "", transition: "", duration: null },
                     ],
                   }))
                 }
@@ -870,6 +870,33 @@ export default function DirectorRoom(props: Props) {
                     </Button>
                   </div>
                 ))}
+
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 6, alignItems: "center" }}>
+                  <span className="faint" style={{ fontSize: "0.8rem" }}>
+                    Length
+                  </span>
+                  <select
+                    className="input"
+                    value={sc.duration ?? ""}
+                    onChange={(e) =>
+                      editPlan((p) => ({
+                        ...p,
+                        scenes: p.scenes.map((x, j) =>
+                          j === i
+                            ? { ...x, duration: e.target.value ? Number(e.target.value) : null }
+                            : x
+                        ),
+                      }))
+                    }
+                  >
+                    <option value="">Auto (≈5s)</option>
+                    <option value="3">3s</option>
+                    <option value="4">4s</option>
+                    <option value="5">5s</option>
+                    <option value="6">6s</option>
+                    <option value="8">8s</option>
+                  </select>
+                </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                   <select
