@@ -305,11 +305,27 @@ def main() -> int:
     }
     studio_template_id = upsert_template(api_key, studio_template, args.dry_run)
 
+    # A single GPU type (e.g. A100 in one region) throttles whenever that
+    # region has no capacity, which stalls every render at 0%. Offer a spread
+    # of >=24GB cards so RunPod can place the worker wherever there is stock.
+    studio_gpu_types = [
+        item.strip()
+        for item in (
+            env.get("RUNPOD_STUDIO_GPU_TYPES")
+            or env.get("RUNPOD_STUDIO_GPU_TYPE")
+            or (
+                "NVIDIA RTX A6000,NVIDIA L40S,NVIDIA L40,NVIDIA A40,"
+                "NVIDIA A100 80GB PCIe,NVIDIA A100-SXM4-80GB,"
+                "NVIDIA RTX PRO 6000 Blackwell Server Edition"
+            )
+        ).split(",")
+        if item.strip()
+    ]
     studio_endpoint = {
         "name": STUDIO_ENDPOINT,
         "templateId": studio_template_id,
         "computeType": "GPU",
-        "gpuTypeIds": [env.get("RUNPOD_STUDIO_GPU_TYPE", "NVIDIA L40S")],
+        "gpuTypeIds": studio_gpu_types,
         "gpuCount": 1,
         "workersMin": 0,
         "workersMax": 1,
