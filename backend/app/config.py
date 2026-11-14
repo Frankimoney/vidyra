@@ -103,7 +103,7 @@ class Settings:
     runpod_api_base: str = os.getenv("RUNPOD_API_BASE", "https://api.runpod.ai/v2")
     runpod_fake: bool = _bool(os.getenv("RUNPOD_FAKE"), False)
     runpod_poll_seconds: int = int(os.getenv("RUNPOD_POLL_SECONDS", "6"))
-    runpod_timeout_minutes: int = int(os.getenv("RUNPOD_TIMEOUT_MINUTES", "40"))
+    runpod_timeout_minutes: int = int(os.getenv("RUNPOD_TIMEOUT_MINUTES", "15"))
     studio_max_runs_per_day: int = int(os.getenv("STUDIO_MAX_RUNS_PER_DAY", "20"))
     studio_max_prompt_chars: int = int(os.getenv("STUDIO_MAX_PROMPT_CHARS", "2000"))
 

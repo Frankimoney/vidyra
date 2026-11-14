@@ -50,3 +50,5 @@ services:
         sync: false
       - key: MAX_CONCURRENCY
         value: "1"
+      - key: RUNPOD_TIMEOUT_MINUTES
+        value: "15"

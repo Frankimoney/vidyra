@@ -329,8 +329,12 @@ def main() -> int:
         "gpuCount": 1,
         "workersMin": 0,
         "workersMax": 1,
-        "idleTimeout": 5,
-        "executionTimeoutMs": 3 * 60 * 60 * 1000,
+        # Keep the worker warm briefly so the frame -> video -> lip-sync passes
+        # of one scene reuse the same pod instead of cold-starting (and
+        # re-billing the model load) between every pass.
+        "idleTimeout": int(env.get("RUNPOD_STUDIO_IDLE_TIMEOUT", "180")),
+        # Hard cap a single GPU pass so a stuck render cannot bill for hours.
+        "executionTimeoutMs": int(env.get("RUNPOD_STUDIO_EXEC_TIMEOUT_MIN", "30")) * 60 * 1000,
         "networkVolumeId": volume_id or "<network-volume-id>",
         "dataCenterIds": [data_center],
         "minCudaVersion": "12.8",
@@ -347,6 +351,7 @@ def main() -> int:
         "WHISPER_BACKEND": "runpod",
         "RUNPOD_API_KEY": api_key,
         "RUNPOD_STUDIO_ENDPOINT_ID": studio_endpoint_id,
+        "RUNPOD_TIMEOUT_MINUTES": env.get("RUNPOD_TIMEOUT_MINUTES", "15"),
     }
     pipeline_env.update(local_firebase_env(env))
     pipeline_env.update(local_r2_env(env))

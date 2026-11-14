@@ -75,7 +75,13 @@ class StudioWorker:
     # Sync processing (thread)
     # ------------------------------------------------------------------
 
-    def _process(self, run_id: str) -> None:
+    def _process(self, run_id: str, on_progress=None) -> None:
+        """Run one studio pass to completion.
+
+        ``on_progress(progress, message)`` is called as the run advances so a
+        caller that owns a bigger job (the film worker) can fold this pass's
+        progress into its own bar. Direct callers pass nothing.
+        """
         try:
             run = self._load(run_id)
             tool = (run.get("tool") or "").strip()
@@ -88,7 +94,7 @@ class StudioWorker:
                     StudioError("AI Studio is not configured. Set RUNPOD_API_KEY + RUNPOD_ENDPOINT_ID, or enable RUNPOD_FAKE=1."),
                 )
                 return
-            self._run_remote(run_id, run, tool)
+            self._run_remote(run_id, run, tool, on_progress=on_progress)
         except Exception as exc:
             self._fail(run_id, exc)
 
@@ -114,7 +120,7 @@ class StudioWorker:
     # Real mode (RunPod Serverless)
     # ------------------------------------------------------------------
 
-    def _run_remote(self, run_id: str, run: dict, tool: str):
+    def _run_remote(self, run_id: str, run: dict, tool: str, on_progress=None):
         studio_service.update_run(
             run_id,
             status="processing",
@@ -137,8 +143,15 @@ class StudioWorker:
         )
 
         started = time.time()
-        last_elapsed_progress = 8
         timeout = self.settings.runpod_timeout_minutes * 60
+        # Progress shown to the user. The GPU worker streams real milestones
+        # through /studio/progress (5 preparing, 10 fetching, 30 rendering,
+        # 80 streaming, 95 done). Between milestones we crawl slowly so the bar
+        # never looks frozen, but we never jump ahead of the next real one: the
+        # old elapsed-time ramp raced to 84% in ~40s and then sat there for the
+        # whole (slow, billed) render, which is exactly what read as "stuck".
+        shown = 2
+        last_sent = None
         while True:
             time.sleep(self.settings.runpod_poll_seconds)
             status = runpod_client.get_run_status(api_base, self.settings.runpod_api_key, endpoint, runpod_run_id)
@@ -158,12 +171,22 @@ class StudioWorker:
                     api_base, self.settings.runpod_api_key, endpoint, runpod_run_id
                 )
                 raise StudioError("GPU job timed out.")
-            progress = min(84, int(last_elapsed_progress + elapsed * 2))
-            if progress != last_elapsed_progress:
-                last_elapsed_progress = progress
+
+            doc = studio_service.get_run(run_id) or {}
+            reported = int(doc.get("progress") or 0)
+            message = str(doc.get("message") or "Rendering on GPU")
+            # Crawl toward the next real milestone, never past it.
+            target = 28 if reported < 30 else 78
+            shown = max(shown, reported)
+            if shown < target:
+                shown = min(target, shown + 1)
+            if (shown, message) != last_sent:
+                last_sent = (shown, message)
                 studio_service.update_run(
-                    run_id, stage="generating", progress=progress, message="Rendering on GPU"
+                    run_id, stage="generating", progress=shown, message=message
                 )
+                if on_progress:
+                    on_progress(shown, message)
 
         studio_service.update_run(run_id, stage="finalizing", progress=90, message="Retrieving output")
         output = self._finalize(run_id, run, _pod_meta(status.get("output")))

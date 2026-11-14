@@ -60,6 +60,25 @@ _DEFAULT_VIDEO_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16, "
 #: "9:16 vertical"), so this is the shape "auto" resolves to for them.
 DEFAULT_FILM_ASPECT = "9:16"
 
+# How one scene's progress slice is shared between the passes that film it: the
+# still frame first, then the motion clip, then the lip-sync. Values are
+# fractions of the scene's slice, so the bar keeps moving *within* a single
+# scene instead of sitting on the scene's start value for minutes.
+_PASS_WEIGHTS = {
+    "txt2img": (0.0, 0.45),
+    "img2img": (0.0, 0.45),
+    "character": (0.0, 0.45),
+    "img2video": (0.45, 0.85),
+    "lipsync": (0.85, 1.0),
+}
+
+
+def _scene_slice(scene: int, scene_count: int) -> tuple[int, int]:
+    """(start, span) of a scene's slice of the 10-80% filming band."""
+    base = 10 + int(70 * (scene - 1) / max(1, scene_count))
+    nxt = 10 + int(70 * scene / max(1, scene_count))
+    return base, max(1, nxt - base)
+
 
 def _scene_frames(duration, fps: int, default: int) -> int:
     """Convert a per-scene length in seconds to a Wan-valid frame count.
@@ -806,6 +825,8 @@ class FilmWorker:
                     refs=[online_ref],
                     title=f"Film · Scene {i + 1} of {n}",
                     on_retry=on_retry,
+                    scene=i + 1,
+                    scene_count=n,
                 )
             elif locked_ref:
                 # 48GB character tool (proven img2img graph, portrait window).
@@ -825,6 +846,8 @@ class FilmWorker:
                     refs=[locked_ref],
                     title=f"Film · Scene {i + 1} of {n} (locked)",
                     on_retry=on_retry,
+                    scene=i + 1,
+                    scene_count=n,
                 )
                 locked_count += 1
             else:
@@ -840,6 +863,8 @@ class FilmWorker:
                     refs=[],
                     title=f"Film · Scene {i + 1} of {n}",
                     on_retry=on_retry,
+                    scene=i + 1,
+                    scene_count=n,
                 )
 
             clip_path = None
@@ -855,6 +880,8 @@ class FilmWorker:
                     ),
                     refs=[{"path": image_path, "role": "image"}],
                     title=f"Film · Scene {i + 1} of {n}",
+                    scene=i + 1,
+                    scene_count=n,
                 )
             except Exception:
                 clip_path = None  # fall back to the still image
@@ -1042,6 +1069,7 @@ class FilmWorker:
                 params=_fp,
                 refs=[{"path": _portrait, "role": "reference"}],
                 title=acting_title + " (locked)", on_retry=on_retry,
+                scene=i + 1, scene_count=n,
             )
         else:
             _tp = dict(_IMAGE_PARAMS.get(image_model, _DEFAULT_IMAGE_PARAMS))
@@ -1052,6 +1080,7 @@ class FilmWorker:
                 prompt=frame_prompt,
                 params=_tp,
                 refs=[], title=acting_title, on_retry=on_retry,
+                scene=i + 1, scene_count=n,
             )
 
         # Scene speech exactly as the editor would narrate it (speaker voices
@@ -1095,6 +1124,7 @@ class FilmWorker:
             ),
             refs=[{"path": frame_path, "role": "image"}],
             title=acting_title, on_retry=on_retry,
+            scene=i + 1, scene_count=n,
         )
 
         used_acting = False
@@ -1112,6 +1142,8 @@ class FilmWorker:
                     ],
                     title=f"Film · {speaker_title} talks",
                     on_retry=on_retry,
+                    scene=i + 1,
+                    scene_count=n,
                 )
                 used_acting = True
             except Exception as exc:
@@ -1273,6 +1305,8 @@ class FilmWorker:
                 refs=[{"path": portrait, "role": "image"}],
                 title=f"Podcast · {speaker}",
                 on_retry=on_retry,
+                scene=i + 1,
+                scene_count=n,
             )
 
             clip_path = motion_path
@@ -1289,6 +1323,8 @@ class FilmWorker:
                         refs=[{"path": motion_path, "role": "video"}, {"path": audio_path, "role": "audio"}],
                         title=f"Podcast · {speaker} talks",
                         on_retry=on_retry,
+                        scene=i + 1,
+                        scene_count=n,
                     )
                     used_lip = True
                 except Exception as exc:
@@ -1401,13 +1437,36 @@ class FilmWorker:
             params["steps"] = min(60, round(base * 1.5))
         return params
 
-    def _run_studio(self, job_id: str, uid: str, tool: str, model: str, prompt: str, params: dict, refs: list, title: str, retries: int = 1, on_retry=None) -> str:
+    def _run_studio(self, job_id: str, uid: str, tool: str, model: str, prompt: str, params: dict, refs: list, title: str, retries: int = 1, on_retry=None, scene: int | None = None, scene_count: int | None = None) -> str:
         """Run one AI Studio pass, with an agentic salvage loop.
 
         If a run fails, the director adjusts the direction (simpler composition,
         lighter params) and re-shoots up to ``retries`` more times before giving
         up. Every retry is reported on the job so the user sees it working.
+
+        When ``scene``/``scene_count`` are given, the pass's own progress is
+        folded into that scene's slice of the job bar (see ``_PASS_WEIGHTS``),
+        so the job page shows "Scene 3 of 8 · Rendering on GPU …" moving instead
+        of a frozen percentage.
         """
+
+        def _sub_progress(progress: int, message: str):
+            if scene is None or not scene_count:
+                self._report(job_id, stage="filming", progress=None, message=message)
+                return
+            base, span = _scene_slice(scene, scene_count)
+            w0, w1 = _PASS_WEIGHTS.get(tool, (0.0, 1.0))
+            frac = w0 + (w1 - w0) * (max(0, min(100, int(progress))) / 100.0)
+            label = f"Scene {scene} of {scene_count} · {message}" if scene_count > 1 else message
+            self._report(
+                job_id,
+                stage="filming",
+                progress=min(base + int(span * frac), base + span - 1),
+                message=label,
+                scene=scene,
+                scene_count=scene_count,
+            )
+
         last_error = None
         film_aspect = ((self._job_settings or {}).get("aspect") or "auto").strip()
         for attempt in range(retries + 1):
@@ -1424,7 +1483,7 @@ class FilmWorker:
                 uid=uid, tool=tool, model=model, prompt=p, params=pa, refs=refs,
                 title=title, job_id=job_id,
             )
-            self.studio_worker._process(run_id)  # sync, so same thread waits for the artifact
+            self.studio_worker._process(run_id, on_progress=_sub_progress)  # sync, so same thread waits for the artifact
             doc = studio_service.get_run(run_id) or {}
             if (doc.get("status") or "") == "completed":
                 primary = (doc.get("output") or {}).get("primary") or {}
