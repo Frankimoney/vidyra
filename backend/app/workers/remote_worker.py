@@ -19,26 +19,33 @@ from ..services import jobs as jobs_service
 from ..services import runpod as runpod_client
 
 
+#: Temporary diagnostic: the outcome of the last wake/rest attempt.
+LAST_WARM: dict = {}
+
+
 def _warm_enabled(settings) -> bool:
     return bool(getattr(settings, "runpod_studio_wake", True))
 
 
 def _set_warm(settings, endpoint_id: str, warm: bool) -> None:
     """Best-effort pin (workersMin=1) or release (workersMin=0) of an endpoint."""
-    if not _warm_enabled(settings):
-        return
     endpoint_id = (endpoint_id or "").strip()
+    if not _warm_enabled(settings):
+        LAST_WARM.update(endpoint=endpoint_id, warm=warm, skipped="disabled")
+        return
     if not (settings.runpod_api_key and endpoint_id):
+        LAST_WARM.update(endpoint=endpoint_id, warm=warm, skipped="no_key_or_id")
         return
     try:
-        runpod_client.set_endpoint_workers_min(
+        r = runpod_client.set_endpoint_workers_min(
             settings.runpod_api_key,
             endpoint_id,
             1 if warm else 0,
             getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
         )
-    except Exception:
-        pass  # warming is best-effort; the render still queues and may cold-start
+        LAST_WARM.update(endpoint=endpoint_id, warm=warm, ok=True, min=r.get("workersMin"))
+    except Exception as exc:
+        LAST_WARM.update(endpoint=endpoint_id, warm=warm, ok=False, error=repr(exc))
 
 
 def wake_pipeline_endpoint(settings) -> None:

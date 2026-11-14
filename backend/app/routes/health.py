@@ -53,6 +53,17 @@ async def diag_wake(request: Request):
         result["patch"] = {"ok": True, "min": r.get("workersMin"), "max": r.get("workersMax")}
     except Exception as e:
         result["patch"] = {"ok": False, "error": repr(e)}
+
+    from ..workers import remote_worker as rw
+
+    result["warmEnabled"] = rw._warm_enabled(s)
+    result["studioEndpointId"] = getattr(s, "studio_endpoint_id", None)
+    try:
+        await asyncio.to_thread(rw.wake_pipeline_endpoint, s)
+        result["wakePipeline"] = {"ok": True}
+    except Exception as e:
+        result["wakePipeline"] = {"ok": False, "error": repr(e)}
+    result["lastWarm"] = rw.LAST_WARM
     return result
 
 
