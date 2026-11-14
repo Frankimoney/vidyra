@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 
 
 def _bool(value, default=False):
-    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass

@@ -37,13 +37,24 @@ def _set_warm(settings, endpoint_id: str, warm: bool) -> None:
         LAST_WARM.update(endpoint=endpoint_id, warm=warm, skipped="no_key_or_id")
         return
     try:
-        r = runpod_client.set_endpoint_workers_min(
+        # Waking also lifts workersMax above zero: a paused endpoint (max=0)
+        # rejects new work with ENDPOINT_PAUSED. Releasing only lowers the floor.
+        r = runpod_client.set_endpoint_workers(
             settings.runpod_api_key,
             endpoint_id,
-            1 if warm else 0,
-            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+            workers_min=1 if warm else 0,
+            workers_max=1 if warm else None,
+            rest_api_base=getattr(
+                settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE
+            ),
         )
-        LAST_WARM.update(endpoint=endpoint_id, warm=warm, ok=True, min=r.get("workersMin"))
+        LAST_WARM.update(
+            endpoint=endpoint_id,
+            warm=warm,
+            ok=True,
+            min=r.get("workersMin"),
+            max=r.get("workersMax"),
+        )
     except Exception as exc:
         LAST_WARM.update(endpoint=endpoint_id, warm=warm, ok=False, error=repr(exc))
 

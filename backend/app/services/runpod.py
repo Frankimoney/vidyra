@@ -151,21 +151,42 @@ def get_endpoint_health(
     return _request(f"{base}/{endpoint_id}/health", api_key, timeout=timeout)
 
 
+def set_endpoint_workers(
+    api_key: str,
+    endpoint_id: str,
+    workers_min: int | None = None,
+    workers_max: int | None = None,
+    rest_api_base: str = DEFAULT_REST_API_BASE,
+) -> dict:
+    """Adjust a serverless endpoint's worker bounds.
+
+    RunPod's autoscaler can stop scaling a datacenter-pinned endpoint up from
+    zero (the Studio endpoint is pinned to its model volume's datacenter), so a
+    queued job never gets a pod. Setting ``workersMin=1`` forces a worker to
+    provision; setting it back to 0 releases it so nothing bills while idle.
+
+    An endpoint whose ``workersMax`` is 0 is *paused* and rejects new work with
+    ``ENDPOINT_PAUSED``, so waking also has to raise ``workersMax`` above zero.
+    """
+    endpoint_id = normalize_endpoint_id(endpoint_id)
+    url = f"{(rest_api_base or DEFAULT_REST_API_BASE).rstrip('/')}/endpoints/{endpoint_id}"
+    payload: dict = {}
+    if workers_min is not None:
+        payload["workersMin"] = int(workers_min)
+    if workers_max is not None:
+        payload["workersMax"] = int(workers_max)
+    if not payload:
+        return {}
+    return _request(url, api_key, payload, timeout=20, method="PATCH")
+
+
 def set_endpoint_workers_min(
     api_key: str,
     endpoint_id: str,
     workers_min: int,
     rest_api_base: str = DEFAULT_REST_API_BASE,
 ) -> dict:
-    """Pin or release a serverless endpoint's minimum workers.
-
-    RunPod's autoscaler can stop scaling a datacenter-pinned endpoint up from
-    zero (the Studio endpoint is pinned to its model volume's datacenter), so a
-    queued job never gets a pod. Setting ``workersMin=1`` forces a worker to
-    provision; setting it back to 0 releases it so nothing bills while idle.
-    """
-    endpoint_id = normalize_endpoint_id(endpoint_id)
-    url = f"{(rest_api_base or DEFAULT_REST_API_BASE).rstrip('/')}/endpoints/{endpoint_id}"
-    return _request(
-        url, api_key, {"workersMin": int(workers_min)}, timeout=20, method="PATCH"
+    """Backwards-compatible wrapper around :func:`set_endpoint_workers`."""
+    return set_endpoint_workers(
+        api_key, endpoint_id, workers_min=workers_min, rest_api_base=rest_api_base
     )
