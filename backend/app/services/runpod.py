@@ -142,6 +142,15 @@ def runpod_health(api_base: str, api_key: str, endpoint_id: str) -> bool:
     return endpoint_id.strip() != ""
 
 
+def get_endpoint_health(
+    api_base: str, api_key: str, endpoint_id: str, timeout: int = 15
+) -> dict:
+    """Return a serverless endpoint's health (worker + queue counts)."""
+    base = normalize_api_base(api_base)
+    endpoint_id = normalize_endpoint_id(endpoint_id)
+    return _request(f"{base}/{endpoint_id}/health", api_key, timeout=timeout)
+
+
 def set_endpoint_workers_min(
     api_key: str,
     endpoint_id: str,

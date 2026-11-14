@@ -21,7 +21,16 @@ from app.services import jobs as jobs_service
 from app.services.firebase import firebase
 from app.services.storage import get_storage_driver
 from app.workers.film_worker import FilmWorker
-from app.workers.studio_worker import StudioWorker
+from app.workers.remote_worker import (
+    endpoint_has_queued_jobs,
+    rest_pipeline_endpoint,
+    wake_pipeline_endpoint,
+)
+from app.workers.studio_worker import (
+    StudioWorker,
+    rest_studio_endpoint,
+    wake_studio_endpoint,
+)
 from app.workers.video_worker import VideoWorker
 
 
@@ -38,6 +47,20 @@ def _build_workers():
     video.studio_worker = studio
     film = FilmWorker(settings, storage, video, studio)
     return video, film
+
+
+def _release_endpoints() -> None:
+    """Release the endpoints pinned for this job once nothing else is waiting.
+
+    Each endpoint refuses to scale up from zero, so it was pinned at
+    workersMin=1 for the render; releasing it here (instead of leaving it warm)
+    is what keeps an idle deployment from billing. A still-queued job keeps its
+    worker so we never strand the next render on a cold endpoint.
+    """
+    if not endpoint_has_queued_jobs(settings, settings.runpod_pipeline_endpoint_id):
+        rest_pipeline_endpoint(settings)
+    if not endpoint_has_queued_jobs(settings, settings.studio_endpoint_id):
+        rest_studio_endpoint(settings)
 
 
 def handler(event):
@@ -61,6 +84,10 @@ def handler(event):
             pass
         return {"error": f"worker setup failed: {exc}"}
 
+    # Both endpoints refuse to scale up from zero, so keep them pinned for the
+    # whole render and release them in the finally below.
+    wake_pipeline_endpoint(settings)
+    wake_studio_endpoint(settings)
     try:
         job = video._load_job(job_id)
         if job.get("type") == "film":
@@ -82,6 +109,8 @@ def handler(event):
         except Exception:
             pass
         return {"error": str(exc)}
+    finally:
+        _release_endpoints()
 
     final = jobs_service.get_job(job_id) or {}
     return {"job_id": job_id, "status": final.get("status", "completed")}

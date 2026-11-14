@@ -19,6 +19,95 @@ from ..services import jobs as jobs_service
 from ..services import runpod as runpod_client
 
 
+def _warm_enabled(settings) -> bool:
+    return bool(getattr(settings, "runpod_studio_wake", True))
+
+
+def _set_warm(settings, endpoint_id: str, warm: bool) -> None:
+    """Best-effort pin (workersMin=1) or release (workersMin=0) of an endpoint."""
+    if not _warm_enabled(settings):
+        return
+    endpoint_id = (endpoint_id or "").strip()
+    if not (settings.runpod_api_key and endpoint_id):
+        return
+    try:
+        runpod_client.set_endpoint_workers_min(
+            settings.runpod_api_key,
+            endpoint_id,
+            1 if warm else 0,
+            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+        )
+    except Exception:
+        pass  # warming is best-effort; the render still queues and may cold-start
+
+
+def wake_pipeline_endpoint(settings) -> None:
+    """Pin the pipeline endpoint so a submitted job gets a worker at once."""
+    _set_warm(settings, getattr(settings, "runpod_pipeline_endpoint_id", ""), True)
+
+
+def rest_pipeline_endpoint(settings) -> None:
+    """Release the pipeline endpoint so it can scale back to zero."""
+    _set_warm(settings, getattr(settings, "runpod_pipeline_endpoint_id", ""), False)
+
+
+def endpoint_has_queued_jobs(settings, endpoint_id: str) -> bool:
+    """True if the endpoint still has jobs waiting, so its worker must stay up.
+
+    Unknown (a health error) counts as busy so we fail safe toward keeping a
+    render alive rather than stranding a queued job on a cold endpoint.
+    """
+    endpoint_id = (endpoint_id or "").strip()
+    if not (settings.runpod_api_key and endpoint_id):
+        return False
+    try:
+        health = runpod_client.get_endpoint_health(
+            getattr(settings, "runpod_api_base", runpod_client.DEFAULT_API_BASE),
+            settings.runpod_api_key,
+            endpoint_id,
+        )
+    except Exception:
+        return True
+    jobs = (health or {}).get("jobs") or {}
+    return int(jobs.get("inQueue") or 0) > 0
+
+
+def _has_active_jobs() -> bool:
+    """True while any render job is queued or processing.
+
+    Unknown counts as busy so a Firestore hiccup never releases a worker that a
+    running render still needs.
+    """
+    try:
+        from ..services.firebase import firebase
+
+        if firebase.db is None:
+            return True
+        snaps = (
+            firebase.db.collection(jobs_service.COLLECTION)
+            .where("status", "in", ["queued", "processing"])
+            .limit(1)
+            .get()
+        )
+        return len(snaps) > 0
+    except Exception:
+        return True
+
+
+def release_endpoints_if_idle(settings) -> None:
+    """Release both endpoints once nothing is queued or processing.
+
+    Safety net for a worker that crashed or timed out while pinned at
+    workersMin=1: with no job running anywhere, nothing should keep billing.
+    """
+    if _has_active_jobs():
+        return
+    from .studio_worker import rest_studio_endpoint
+
+    rest_studio_endpoint(settings)
+    rest_pipeline_endpoint(settings)
+
+
 class PipelineWorker:
     """Route render jobs to RunPod, or to local workers during development."""
 
@@ -36,6 +125,7 @@ class PipelineWorker:
 
     async def submit(self, job_id: str) -> None:
         if self.remote_enabled:
+            await asyncio.to_thread(self._wake_for_submit)
             await asyncio.to_thread(self._submit_remote, job_id)
             return
         if self.settings.dev_mode:
@@ -52,6 +142,20 @@ class PipelineWorker:
                 "can submit renders to RunPod."
             ),
         )
+
+    def _wake_for_submit(self) -> None:
+        """Pin both endpoints the moment a render is submitted.
+
+        The pipeline endpoint and the Studio endpoint (pinned to its model
+        volume's datacenter) both refuse to scale up from zero, so a queued job
+        would otherwise sit at 0% until something forces a worker. Pinning here
+        also starts warming the Studio GPU while the script is still being
+        written, so the first scene doesn't wait on a cold ComfyUI boot.
+        """
+        from .studio_worker import wake_studio_endpoint
+
+        wake_pipeline_endpoint(self.settings)
+        wake_studio_endpoint(self.settings)
 
     def _submit_remote(self, job_id: str) -> None:
         api_base = self.settings.runpod_api_base.rstrip("/")
