@@ -24,6 +24,38 @@ _last_reconcile = 0.0
 _RECONCILE_SECONDS = 120
 
 
+@router.get("/_diag/wake")
+async def diag_wake(request: Request):
+    """Temporary: report whether this instance can reach RunPod's REST API."""
+    from ..services import runpod as rp
+
+    s = request.app.state.settings
+    result = {"restBase": s.runpod_rest_api_base, "pipeline": s.runpod_pipeline_endpoint_id}
+    try:
+        got = await asyncio.to_thread(
+            rp._request,
+            f"{s.runpod_rest_api_base.rstrip('/')}/endpoints",
+            s.runpod_api_key,
+            None,
+            20,
+            "GET",
+        )
+        result["list"] = {"ok": True, "count": len(got) if isinstance(got, list) else -1}
+    except Exception as e:
+        result["list"] = {"ok": False, "error": repr(e)}
+    try:
+        r = await asyncio.to_thread(
+            rp.set_endpoint_workers_min,
+            s.runpod_api_key,
+            s.runpod_pipeline_endpoint_id,
+            1,
+        )
+        result["patch"] = {"ok": True, "min": r.get("workersMin"), "max": r.get("workersMax")}
+    except Exception as e:
+        result["patch"] = {"ok": False, "error": repr(e)}
+    return result
+
+
 @router.get("/health", response_model=HealthOut)
 async def health(request: Request):
     settings = getattr(request.app.state, "settings", None)
