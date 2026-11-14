@@ -17,6 +17,7 @@ import urllib.request
 
 
 DEFAULT_API_BASE = "https://api.runpod.ai/v2"
+DEFAULT_REST_API_BASE = "https://rest.runpod.io/v1"
 
 
 def normalize_api_base(api_base: str) -> str:
@@ -43,13 +44,26 @@ class RunPodError(RuntimeError):
         self.status = status
 
 
-def _request(url: str, api_key: str, payload: dict | None = None, timeout: int = 60):
-    headers = {"Authorization": f"Bearer {api_key}"}
+def _request(
+    url: str,
+    api_key: str,
+    payload: dict | None = None,
+    timeout: int = 60,
+    method: str | None = None,
+):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+        # RunPod's REST API rejects urllib's default agent with a 403.
+        "User-Agent": "VidyraBackend/1.0",
+    }
     data = None
     if payload is not None:
         data = json.dumps(payload).encode()
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if payload else "GET")
+    if method is None:
+        method = "POST" if payload is not None else "GET"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     ctx = ssl.create_default_context()
     ctx.check_hostname = True
     try:
@@ -126,3 +140,23 @@ def cancel_run(api_base: str, api_key: str, endpoint_id: str, run_id: str) -> di
 
 def runpod_health(api_base: str, api_key: str, endpoint_id: str) -> bool:
     return endpoint_id.strip() != ""
+
+
+def set_endpoint_workers_min(
+    api_key: str,
+    endpoint_id: str,
+    workers_min: int,
+    rest_api_base: str = DEFAULT_REST_API_BASE,
+) -> dict:
+    """Pin or release a serverless endpoint's minimum workers.
+
+    RunPod's autoscaler can stop scaling a datacenter-pinned endpoint up from
+    zero (the Studio endpoint is pinned to its model volume's datacenter), so a
+    queued job never gets a pod. Setting ``workersMin=1`` forces a worker to
+    provision; setting it back to 0 releases it so nothing bills while idle.
+    """
+    endpoint_id = normalize_endpoint_id(endpoint_id)
+    url = f"{(rest_api_base or DEFAULT_REST_API_BASE).rstrip('/')}/endpoints/{endpoint_id}"
+    return _request(
+        url, api_key, {"workersMin": int(workers_min)}, timeout=20, method="PATCH"
+    )

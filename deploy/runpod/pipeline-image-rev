@@ -1,3 +1,4 @@
 2026-11-13: rebuild pipeline for RunPod /status polling fix
 2026-11-13: pipeline worker must read RUNPOD_STUDIO_ENDPOINT_ID
 2026-11-14: real scene progress + bounded GPU billing (film_worker, studio_worker, config)
+2026-11-14: wake the datacenter-pinned Studio endpoint before a render, release after

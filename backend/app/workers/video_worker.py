@@ -500,7 +500,18 @@ class VideoWorker:
             title=f"{label} · cloned voice",
             job_id=job_id,
         )
-        self.studio_worker._process(run_id)
+        # The Studio endpoint won't scale from zero (it is pinned to its model
+        # volume's datacenter), so pin a worker for this run and release it
+        # after so nothing bills while idle.
+        wake = getattr(self.studio_worker, "wake", None)
+        rest = getattr(self.studio_worker, "rest", None)
+        if wake:
+            wake()
+        try:
+            self.studio_worker._process(run_id)
+        finally:
+            if rest:
+                rest()
         doc = studio_service.get_run(run_id) or {}
         if (doc.get("status") or "") != "completed":
             raise PipelineError(

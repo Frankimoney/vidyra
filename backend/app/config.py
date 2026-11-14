@@ -101,9 +101,16 @@ class Settings:
     runpod_studio_endpoint_id: str = os.getenv("RUNPOD_STUDIO_ENDPOINT_ID", "")
     runpod_pipeline_endpoint_id: str = os.getenv("RUNPOD_PIPELINE_ENDPOINT_ID", "")
     runpod_api_base: str = os.getenv("RUNPOD_API_BASE", "https://api.runpod.ai/v2")
+    runpod_rest_api_base: str = os.getenv(
+        "RUNPOD_REST_API_BASE", "https://rest.runpod.io/v1"
+    )
     runpod_fake: bool = _bool(os.getenv("RUNPOD_FAKE"), False)
     runpod_poll_seconds: int = int(os.getenv("RUNPOD_POLL_SECONDS", "6"))
     runpod_timeout_minutes: int = int(os.getenv("RUNPOD_TIMEOUT_MINUTES", "15"))
+    # The Studio endpoint is pinned to its model volume's datacenter, where
+    # RunPod's autoscaler won't scale from zero. Pin one worker before a render
+    # and release it when the job finishes so nothing bills while idle.
+    runpod_studio_wake: bool = _bool(os.getenv("RUNPOD_STUDIO_WAKE"), True)
     studio_max_runs_per_day: int = int(os.getenv("STUDIO_MAX_RUNS_PER_DAY", "20"))
     studio_max_prompt_chars: int = int(os.getenv("STUDIO_MAX_PROMPT_CHARS", "2000"))
 

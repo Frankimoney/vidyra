@@ -368,7 +368,10 @@ async def create_studio_run(
         studio_service.update_run(run_id, research=research)
 
     worker: StudioWorker = request.app.state.studio_worker
-    await worker.submit(run_id)
+    # The Studio endpoint is pinned to its model volume's datacenter and won't
+    # scale from zero, so pin a worker for this run and release it when done.
+    worker.wake()
+    await worker.submit(run_id, rest_after=True)
 
     if s.runpod_fake:
         return {"run_id": run_id, "status": "queued", "fake": True}

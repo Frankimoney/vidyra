@@ -382,6 +382,14 @@ class FilmWorker:
                     "(or RUNPOD_FAKE=1) to generate films."
                 )
 
+            # The Studio endpoint won't scale from zero (it is pinned to its
+            # model volume's datacenter), so pin one worker up front and release
+            # it in the finally below — otherwise the first scene queues forever.
+            wake = getattr(self.studio_worker, "wake", None)
+            if wake:
+                wake()
+            self._studio_awake = True
+
             outline = self._direct(job_id, job, film)
             if film.get("mode") == "podcast":
                 self._film_podcast(job_id, job, outline, work_dir)
@@ -390,6 +398,11 @@ class FilmWorker:
         except Exception as exc:
             self.video_worker._fail(job_id, exc)
         finally:
+            if getattr(self, "_studio_awake", False):
+                rest = getattr(self.studio_worker, "rest", None)
+                if rest:
+                    rest()
+                self._studio_awake = False
             shutil.rmtree(work_dir, ignore_errors=True)
 
     # ------------------------------------------------------------------

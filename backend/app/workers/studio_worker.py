@@ -19,6 +19,7 @@ import hmac
 import json
 import os
 import hashlib
+import threading
 import time
 
 from pipeline.utils import classify_media, run_cmd
@@ -32,6 +33,46 @@ from ..services.storage.base import as_absolute
 def _artifact_token(run_id: str, secret: str) -> str:
     """HMAC token a GPU worker must present to stream an artifact back."""
     return hmac.new(secret.encode(), f"studio:{run_id}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def wake_studio_endpoint(settings: Settings) -> None:
+    """Force the Studio endpoint to provision a worker (best effort).
+
+    The Studio endpoint is pinned to its model volume's datacenter, where
+    RunPod's autoscaler will not scale from zero — a queued job would sit
+    forever at 0%. Pinning ``workersMin=1`` makes a pod come up; call
+    ``rest_studio_endpoint`` to release it so nothing bills while idle.
+    """
+    if not getattr(settings, "runpod_studio_wake", True):
+        return
+    if not (settings.runpod_api_key and settings.studio_endpoint_id):
+        return
+    try:
+        runpod_client.set_endpoint_workers_min(
+            settings.runpod_api_key,
+            settings.studio_endpoint_id,
+            1,
+            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+        )
+    except Exception:
+        pass  # waking is best-effort; the run still queues and may cold-start
+
+
+def rest_studio_endpoint(settings: Settings) -> None:
+    """Release the Studio endpoint's pinned worker so it can scale to zero."""
+    if not getattr(settings, "runpod_studio_wake", True):
+        return
+    if not (settings.runpod_api_key and settings.studio_endpoint_id):
+        return
+    try:
+        runpod_client.set_endpoint_workers_min(
+            settings.runpod_api_key,
+            settings.studio_endpoint_id,
+            0,
+            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+        )
+    except Exception:
+        pass
 
 
 def _pod_meta(output) -> dict:
@@ -51,13 +92,35 @@ class StudioWorker:
         self.settings = settings
         self.storage = storage
         self._semaphore = asyncio.Semaphore(max(1, settings.max_concurrency))
+        # Nesting count for the Studio endpoint wake. A film pins the endpoint
+        # once for all of its passes; standalone runs pin it each. It is
+        # released only when the last caller finishes, so overlapping work never
+        # releases a worker another caller still needs.
+        self._wake_depth = 0
+        self._wake_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    async def submit(self, run_id: str) -> None:
-        task = asyncio.create_task(self._run(run_id))
+    def wake(self) -> None:
+        """Pin a Studio worker for the duration of the caller's work."""
+        with self._wake_lock:
+            self._wake_depth += 1
+            first = self._wake_depth == 1
+        if first:
+            wake_studio_endpoint(self.settings)
+
+    def rest(self) -> None:
+        """Release the pinned Studio worker once no caller needs it."""
+        with self._wake_lock:
+            self._wake_depth = max(0, self._wake_depth - 1)
+            last = self._wake_depth == 0
+        if last:
+            rest_studio_endpoint(self.settings)
+
+    async def submit(self, run_id: str, rest_after: bool = False) -> None:
+        task = asyncio.create_task(self._run(run_id, rest_after=rest_after))
         task.add_done_callback(self._on_done)
 
     def _on_done(self, task):
@@ -67,9 +130,13 @@ class StudioWorker:
         if exc is not None:
             pass  # handled inside _process
 
-    async def _run(self, run_id: str) -> None:
-        async with self._semaphore:
-            await asyncio.to_thread(self._process, run_id)
+    async def _run(self, run_id: str, rest_after: bool = False) -> None:
+        try:
+            async with self._semaphore:
+                await asyncio.to_thread(self._process, run_id)
+        finally:
+            if rest_after:
+                self.rest()
 
     # ------------------------------------------------------------------
     # Sync processing (thread)
