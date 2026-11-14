@@ -63,6 +63,14 @@ async def diag_wake(request: Request):
         result["wakePipeline"] = {"ok": True}
     except Exception as e:
         result["wakePipeline"] = {"ok": False, "error": repr(e)}
+
+    from ..workers import studio_worker as sw
+
+    try:
+        await asyncio.to_thread(sw.wake_studio_endpoint, s)
+        result["wakeStudio"] = {"ok": True}
+    except Exception as e:
+        result["wakeStudio"] = {"ok": False, "error": repr(e)}
     result["lastWarm"] = rw.LAST_WARM
     return result
 

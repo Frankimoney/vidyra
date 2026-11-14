@@ -48,11 +48,16 @@ def wake_studio_endpoint(settings: Settings) -> None:
     if not (settings.runpod_api_key and settings.studio_endpoint_id):
         return
     try:
-        runpod_client.set_endpoint_workers_min(
+        # Also lift workersMax: a paused endpoint (max=0) rejects min=1 and
+        # would otherwise never provision a pod.
+        runpod_client.set_endpoint_workers(
             settings.runpod_api_key,
             settings.studio_endpoint_id,
-            1,
-            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+            workers_min=1,
+            workers_max=1,
+            rest_api_base=getattr(
+                settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE
+            ),
         )
     except Exception:
         pass  # waking is best-effort; the run still queues and may cold-start
@@ -65,11 +70,13 @@ def rest_studio_endpoint(settings: Settings) -> None:
     if not (settings.runpod_api_key and settings.studio_endpoint_id):
         return
     try:
-        runpod_client.set_endpoint_workers_min(
+        runpod_client.set_endpoint_workers(
             settings.runpod_api_key,
             settings.studio_endpoint_id,
-            0,
-            getattr(settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE),
+            workers_min=0,
+            rest_api_base=getattr(
+                settings, "runpod_rest_api_base", runpod_client.DEFAULT_REST_API_BASE
+            ),
         )
     except Exception:
         pass
