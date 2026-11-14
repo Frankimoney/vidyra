@@ -68,6 +68,26 @@ jobs:
           provenance: false
           sbom: false
 
+      - name: Point the RunPod pipeline template at the new image
+        # RunPod caches by tag, so :latest is unreliable; pin the template to
+        # the immutable commit tag we just pushed. Skips cleanly if the repo
+        # secret/variable are not configured.
+        continue-on-error: true
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          TEMPLATE_ID: ${{ vars.RUNPOD_PIPELINE_TEMPLATE_ID }}
+        run: |
+          if [ -z "$RUNPOD_API_KEY" ] || [ -z "$TEMPLATE_ID" ]; then
+            echo "RUNPOD_API_KEY secret or RUNPOD_PIPELINE_TEMPLATE_ID variable not set; skipping."
+            exit 0
+          fi
+          curl -fsS -X PATCH \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"imageName\":\"ghcr.io/frankimoney/vidyra-pipeline:${GITHUB_SHA}\"}" \
+            "https://rest.runpod.io/v1/templates/${TEMPLATE_ID}"
+          echo "Template ${TEMPLATE_ID} now points at ghcr.io/frankimoney/vidyra-pipeline:${GITHUB_SHA}"
+
   studio:
     name: Build studio image
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target != 'pipeline' }}
