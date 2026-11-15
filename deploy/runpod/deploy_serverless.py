@@ -35,6 +35,10 @@ STUDIO_IMAGE = "ghcr.io/frankimoney/vidyra-studio:latest"
 PIPELINE_IMAGE = "ghcr.io/frankimoney/vidyra-pipeline:latest"
 DEFAULT_PUBLIC_URL = "https://vidyra-api.onrender.com"
 
+# The RunPod REST API only accepts these on template creation; sending them in a
+# PATCH body fails with "Extra input keys provided in request body".
+CREATE_ONLY_TEMPLATE_KEYS = {"category", "isServerless"}
+
 
 def load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -165,7 +169,12 @@ def upsert_template(api_key: str, spec: dict[str, Any], dry_run: bool) -> str:
     existing = find_by_name(api_request("GET", "/templates", api_key), name)
     if existing:
         template_id = existing["id"]
-        api_request("PATCH", f"/templates/{template_id}", api_key, spec)
+        update = {
+            key: value
+            for key, value in spec.items()
+            if key not in CREATE_ONLY_TEMPLATE_KEYS
+        }
+        api_request("PATCH", f"/templates/{template_id}", api_key, update)
         print(f"Updated template {name} ({template_id})")
         return template_id
     created = api_request("POST", "/templates", api_key, spec)

@@ -19,14 +19,11 @@ nohup python /ComfyUI/main.py \
 
 echo "ComfyUI starting on port $COMFY_PORT (pid $!)"
 
-# Wait until ComfyUI answers /system_stats (up to 10 min for cold model load).
-for i in $(seq 1 120); do
-  if curl -sf "http://127.0.0.1:${COMFY_PORT}/system_stats" >/dev/null 2>&1; then
-    echo "ComfyUI is ready after ${i}0s."
-    break
-  fi
-  sleep 10
-done
+# Do NOT block here waiting for ComfyUI. A RunPod serverless worker must call
+# runpod.serverless.start promptly or RunPod marks it unhealthy and restarts
+# it, which leaves every job stuck IN_QUEUE while the GPU still bills. The
+# worker waits for ComfyUI per job instead (worker.py:_wait_for_comfy), and
+# ComfyUI has the whole cold-start window to come up in parallel.
 
 # One pod runs everything: the film pipeline drives ComfyUI in-process
 # (STUDIO_LOCAL=1) and standalone Studio runs hit the same handler.

@@ -86,7 +86,9 @@ def handler(event):
 
     # Both endpoints refuse to scale up from zero, so keep them pinned for the
     # whole render and release them in the finally below. In merged mode the
-    # Studio runs happen in this pod, so there is no separate endpoint to pin.
+    # API pins this same endpoint on submit, so we skip the redundant wake but
+    # MUST still release it, otherwise the endpoint stays at workersMin=1 and
+    # bills forever after the render finishes.
     local = getattr(settings, "studio_local", False)
     if not local:
         wake_pipeline_endpoint(settings)
@@ -113,8 +115,7 @@ def handler(event):
             pass
         return {"error": str(exc)}
     finally:
-        if not local:
-            _release_endpoints()
+        _release_endpoints()
 
     final = jobs_service.get_job(job_id) or {}
     return {"job_id": job_id, "status": final.get("status", "completed")}
