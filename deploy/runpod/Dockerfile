@@ -102,6 +102,10 @@ RUN chmod +x /setup_model_links.sh
 # (STUDIO_LOCAL=1) instead of submitting sub-jobs to itself, which would
 # deadlock behind the running job when workersMax=1.
 COPY backend/requirements.txt /app/backend/requirements.txt
+# The CUDA base ships some libs via apt (PyJWT, grpcio, ...) with no RECORD, so
+# pip cannot uninstall them and aborts. Drop those Debian copies first.
+COPY deploy/runpod/clean_debian_pkgs.py /clean_debian_pkgs.py
+RUN python /clean_debian_pkgs.py
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend /app/backend
 COPY pipeline /app/pipeline
