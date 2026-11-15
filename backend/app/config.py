@@ -113,6 +113,13 @@ class Settings:
     # RunPod's autoscaler won't scale from zero. Pin one worker before a render
     # and release it when the job finishes so nothing bills while idle.
     runpod_studio_wake: bool = _bool(os.getenv("RUNPOD_STUDIO_WAKE"), True)
+    # Merged mode: the film pipeline runs inside the Studio GPU pod and drives
+    # ComfyUI in-process (127.0.0.1:8188) instead of submitting sub-jobs to the
+    # Studio endpoint — submitting to the same endpoint would deadlock behind
+    # the running job when workersMax=1. Set STUDIO_LOCAL=1 in the merged image.
+    studio_local: bool = _bool(os.getenv("STUDIO_LOCAL"), False)
+    # Absolute path to the ComfyUI driver module (worker.py) for local mode.
+    comfy_worker_path: str = os.getenv("COMFY_WORKER_PATH", "/worker.py")
     studio_max_runs_per_day: int = int(os.getenv("STUDIO_MAX_RUNS_PER_DAY", "20"))
     studio_max_prompt_chars: int = int(os.getenv("STUDIO_MAX_PROMPT_CHARS", "2000"))
 
@@ -136,7 +143,7 @@ class Settings:
     # Film generation (auto "long film" from a one-line idea)
     film_max_scenes: int = int(os.getenv("FILM_MAX_SCENES", "16"))
     v1_image_model: str = os.getenv("FILM_IMAGE_MODEL", "sdxl")
-    v1_video_model: str = os.getenv("FILM_VIDEO_MODEL", "wan21-i2v")
+    v1_video_model: str = os.getenv("FILM_VIDEO_MODEL", "wan22-i2v")
 
     # Podcast video generation (talking-head dialogue around a topic)
     podcast_max_turns: int = int(os.getenv("PODCAST_MAX_TURNS", "12"))

@@ -130,11 +130,11 @@ WAN_DEFAULTS = {"aspect": "auto", "width": 0, "height": 0,
                 "duration": 10, "fps": 0, "steps": 6, "cfg": 1.0, "seed": 0}
 
 check("auto leaves the model's tuned canvas alone",
-      studio_routes._apply_aspect("img2video", "wan21-i2v",
+      studio_routes._apply_aspect("img2video", "wan22-i2v",
                                   {"aspect": "auto", "width": 0, "height": 0})
       == {"aspect": "auto", "width": 0, "height": 0})
 
-wan_wide = studio_routes._apply_aspect("img2video", "wan21-i2v", {"aspect": "16:9", "width": 0, "height": 0})
+wan_wide = studio_routes._apply_aspect("img2video", "wan22-i2v", {"aspect": "16:9", "width": 0, "height": 0})
 check("Wan with 0x0 defaults gets the video tier, not a crash",
       max(wan_wide["width"], wan_wide["height"]) == aspect_lib.VIDEO_TIERS["sd"],
       f"{wan_wide['width']}x{wan_wide['height']}")
@@ -148,7 +148,7 @@ check("a fixed ratio overrides the model's square default", sdxl["width"] > sdxl
       f"{sdxl['width']}x{sdxl['height']}")
 
 try:
-    studio_routes._apply_aspect("img2video", "wan21-i2v", {"aspect": "7:3", "width": 0, "height": 0})
+    studio_routes._apply_aspect("img2video", "wan22-i2v", {"aspect": "7:3", "width": 0, "height": 0})
     check("an unknown ratio is rejected with 400", False, "no error raised")
 except HTTPException as exc:
     check("an unknown ratio is rejected with 400", exc.status_code == 400, str(exc.status_code))

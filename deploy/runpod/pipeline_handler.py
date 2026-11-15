@@ -85,9 +85,12 @@ def handler(event):
         return {"error": f"worker setup failed: {exc}"}
 
     # Both endpoints refuse to scale up from zero, so keep them pinned for the
-    # whole render and release them in the finally below.
-    wake_pipeline_endpoint(settings)
-    wake_studio_endpoint(settings)
+    # whole render and release them in the finally below. In merged mode the
+    # Studio runs happen in this pod, so there is no separate endpoint to pin.
+    local = getattr(settings, "studio_local", False)
+    if not local:
+        wake_pipeline_endpoint(settings)
+        wake_studio_endpoint(settings)
     try:
         job = video._load_job(job_id)
         if job.get("type") == "film":
@@ -110,7 +113,8 @@ def handler(event):
             pass
         return {"error": str(exc)}
     finally:
-        _release_endpoints()
+        if not local:
+            _release_endpoints()
 
     final = jobs_service.get_job(job_id) or {}
     return {"job_id": job_id, "status": final.get("status", "completed")}

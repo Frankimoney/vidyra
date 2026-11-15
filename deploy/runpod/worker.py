@@ -2,8 +2,8 @@
 
 Runs ComfyUI on the GPU pod and drives it through its local HTTP API.
 Each job received from the backend carries:
-  tool        e.g. "txt2img" | "img2video" | "lipsync"
-  model       e.g. "sdxl", "wan21-i2v", ...
+  tool        e.g. "txt2img" | "txt2video" | "img2video" | "lipsync"
+  model       e.g. "sdxl", "wan22-i2v", "wan22-t2v"
   prompt      text
   params      width/height/steps/frames/fps/cfg/denoise/negative/...
   refs        [{path, url}] signed source media URLs to download
@@ -39,25 +39,20 @@ import urllib.request
 # matching the keys below, or override per-run via params["model_file"]).
 MODEL_FILES = {
     "sdxl": {"ckpt": "sd_xl_base_1.0.safetensors"},
-    "wan21-i2v": {
-        "unet": "wan2.1_i2v_480p_14B_fp8_scaled.safetensors",
-        "clip_vision": "clip_vision_h.safetensors",
+    # Wan2.2 14B video: two-pass (high/low noise) MoE experts, fp8, on the
+    # Wan2.1 16-channel VAE. The official ComfyUI templates use wan_2.1_vae for
+    # both 14B T2V and I2V (wan2.2_vae is only for the 5B TI2V model).
+    "wan22-t2v": {
+        "unet_high": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+        "unet_low": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
         "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "vae": "wan_2.1_vae.safetensors",
     },
-    "wan21-flf2v": {
-        "unet": "wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors",
-        "clip_vision": "clip_vision_h.safetensors",
+    "wan22-i2v": {
+        "unet_high": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+        "unet_low": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
         "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "vae": "wan_2.1_vae.safetensors",
-    },
-    "wan22-cam-i2v": {
-        # Wan2.2 Fun Camera Control: two-pass (high/low noise) camera-aware I2V.
-        # Provision these from the Comfy-Org Wan_2.2_ComfyUI_Repackaged repo.
-        "unet_high": "wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors",
-        "unet_low": "wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors",
-        "vae": "wan_2.1_vae.safetensors",
-        "clip": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
     },
     # "lipsync" is intentionally absent: Wav2Lip runs directly in the pod (see
     # _run_lipsync) and its checkpoints are baked into the image, so there is
@@ -189,112 +184,92 @@ def _build_txt2img(params: dict) -> dict:
     }
 
 
-def _build_img2video(params: dict) -> dict:
+def _build_txt2video(params: dict) -> dict:
+    """Wan2.2 14B text-to-video (fp8, two-pass high/low-noise experts).
+
+    Mirrors ComfyUI's official "Wan 2.2 14B T2V" template: EmptyHunyuanLatentVideo
+    makes the latent, the high-noise expert denoises steps 0..half, the low-noise
+    expert refines half..end, then the Wan2.1 VAE decodes and VHS muxes to mp4.
+    """
     p = params.get("params") or {}
     model = params.get("model")
     w, h = int(p.get("width", 832)), int(p.get("height", 480))
     frames = int(p.get("frames", 81))
     fps = int(p.get("fps", 16))
     steps = int(p.get("steps", 20))
-    cfg = float(p.get("cfg", 5.0))
+    cfg = float(p.get("cfg", 4.0))
     seed = int(p.get("seed", 0))
-    denoise = float(p.get("denoise", 1.0))
     positive = params.get("prompt", "")
+    negative = str(p.get("negative", ""))
+    files = params.get("model_files") or MODEL_FILES.get(model, {})
+    unet_high = files.get("unet_high", "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors")
+    unet_low = files.get("unet_low", "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors")
+    half = max(1, steps // 2)
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_high, "weight_dtype": "default"}},
+        "2": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_low, "weight_dtype": "default"}},
+        "3": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
+        "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["2", 0], "shift": 8.0}},
+        "5": {"class_type": "CLIPLoader", "inputs": {"clip_name1": files.get("clip", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"), "clip_name2": "", "type": "wan", "device": "default"}},
+        "6": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", "wan_2.1_vae.safetensors")}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": positive}},
+        "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": negative}},
+        "9": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": w, "height": h, "length": frames, "batch_size": 1}},
+        # High-noise expert establishes motion/structure (steps 0..half).
+        "10": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["3", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["9", 0], "add_noise": "enable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": 0, "end_at_step": half, "return_with_leftover_noise": "enable"}},
+        # Low-noise expert refines detail (steps half..end).
+        "11": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["4", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["10", 0], "add_noise": "disable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": half, "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["6", 0]}},
+        "13": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["12", 0], fps, "vidyra_t2v")},
+    }
+
+
+def _build_img2video(params: dict) -> dict:
+    """Wan2.2 14B image-to-video (fp8, two-pass high/low-noise experts).
+
+    Mirrors ComfyUI's official "Wan 2.2 14B I2V" template: the start frame is
+    scaled and handed to WanImageToVideo, which stamps it into the conditioning;
+    the high-noise expert denoises steps 0..half, the low-noise expert refines
+    half..end, then the Wan2.1 VAE decodes and VHS muxes to mp4.
+    """
+    p = params.get("params") or {}
+    model = params.get("model")
+    w, h = int(p.get("width", 832)), int(p.get("height", 480))
+    frames = int(p.get("frames", 81))
+    fps = int(p.get("fps", 16))
+    steps = int(p.get("steps", 20))
+    cfg = float(p.get("cfg", 4.0))
+    seed = int(p.get("seed", 0))
+    positive = params.get("prompt", "")
+    negative = str(p.get("negative", ""))
     files = params.get("model_files") or MODEL_FILES.get(model, {})
     image_name = params.get("ref_files", {}).get("image", "SOURCE_IMAGE.png")
-
-    if model == "wan22-cam-i2v":
-        # Wan2.2 Fun Camera Control: cinematic camera motion from a still image.
-        # Mirrors ComfyUI's official "Wan 2.2 Fun Camera Control" workflow —
-        # a camera trajectory (pan/zoom/rotate) built by WanCameraEmbedding is
-        # stamped into the conditioning of WanCameraImageToVideo, and sampling
-        # runs a two-pass denoise (high-noise model steps 0..half, low-noise
-        # model half..end) to keep the subject stable while the camera moves.
-        unet_high = files.get("unet_high", "wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors")
-        unet_low = files.get("unet_low", "wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors")
-        vae = files.get("vae", "wan_2.1_vae.safetensors")
-        clip = files.get("clip", "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
-        camera_pose = str(p.get("camera_pose") or "").strip() or "Zoom In"
-        camera_speed = float(p.get("camera_speed") or 1.0)
-        half = max(1, steps // 2)
-        return {
-            # Two-pass diffusion models + per-model sampling shift (Wan2.2).
-            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_high, "weight_dtype": "default"}},
-            "2": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_low, "weight_dtype": "default"}},
-            "3": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8}},
-            "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["2", 0], "shift": 8}},
-            "5": {"class_type": "CLIPLoader", "inputs": {"clip_name1": clip, "clip_name2": "", "type": "wan", "device": "default"}},
-            "6": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": positive}},
-            "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": str(p.get("negative", ""))}},
-            "9": {"class_type": "LoadImage", "inputs": {"image": image_name}},
-            "10": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["9", 0]}},
-            # Camera trajectory: pose (pan/zoom/orbit), length, and speed.
-            "11": {"class_type": "WanCameraEmbedding", "inputs": {"camera_pose": camera_pose, "width": w, "height": h, "length": frames, "speed": camera_speed}},
-            "12": {"class_type": "WanCameraImageToVideo", "inputs": {
-                "positive": ["7", 0], "negative": ["8", 0], "vae": ["6", 0],
-                "width": w, "height": h, "length": frames, "batch_size": 1,
-                "start_image": ["10", 0], "camera_conditions": ["11", 0],
-            }},
-            # High-noise pass establishes motion/structure (steps 0..half).
-            "13": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["3", 0], "positive": ["12", 0], "negative": ["12", 1], "latent_image": ["12", 2], "add_noise": "enable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": 0, "end_at_step": half, "return_with_leftover_noise": "enable"}},
-            # Low-noise pass refines detail (steps half..end), fixing flicker.
-            "14": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["4", 0], "positive": ["12", 0], "negative": ["12", 1], "latent_image": ["13", 0], "add_noise": "disable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": half, "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
-            "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["6", 0]}},
-            "16": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["15", 0], fps, "vidyra_cam")},
-        }
-    if model in ("wan21-i2v", "wan21-flf2v"):
-        # Wan2.1 image-to-video using ComfyUI's native Wan nodes.
-        #   wan21-i2v   : single start frame (+ optional reference clip-vision guide)
-        #   wan21-flf2v : first + last frame interpolation (WanFirstLastFrameToVideo)
-        unet = files.get("unet", "wan2.1_i2v_480p_14B_fp8_scaled.safetensors")
-        vision = files.get("clip_vision", "clip_vision_h.safetensors")
-        refs = params.get("ref_files", {})
-        start_name = refs.get("image", "START.png")
-        end_name = refs.get("end_image")
-        reference_name = refs.get("reference")
-
-        graph = {
-            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
-            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name1": files.get("clip", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"), "clip_name2": "", "type": "wan", "device": "default"}},
-            "3": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", "wan_2.1_vae.safetensors")}},
-            "4": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": vision}},
-            "5": {"class_type": "LoadImage", "inputs": {"image": start_name}},
-            "6": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["5", 0]}},
-        }
-
-        # Clip-vision guide: use the reference image if given, else the start frame.
-        guide_node = "6"
-        if reference_name:
-            graph["11"] = {"class_type": "LoadImage", "inputs": {"image": reference_name}}
-            graph["12"] = {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["11", 0]}}
-            guide_node = "12"
-        graph["13"] = {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["4", 0], "image": [guide_node, 0], "crop": "center"}}
-
-        if model == "wan21-flf2v" and end_name:
-            graph["14"] = {"class_type": "LoadImage", "inputs": {"image": end_name}}
-            graph["15"] = {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["14", 0]}}
-            graph["7"] = {"class_type": "WanFirstLastFrameToVideo", "inputs": {
-                "width": w, "height": h, "length": frames, "batch_size": 1,
-                "positive": positive, "negative": "",
-                "vae": ["3", 0],
-                "start_image": ["6", 0], "end_image": ["15", 0],
-                "clip_vision_start_image": ["13", 0],
-            }}
-        else:
-            graph["7"] = {"class_type": "WanImageToVideo", "inputs": {
-                "width": w, "height": h, "length": frames, "batch_size": 1,
-                "positive": positive, "negative": "",
-                "vae": ["3", 0],
-                "start_image": ["6", 0],
-                "clip_vision_output": ["13", 0],
-            }}
-
-        graph["8"] = {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["7", 0], "negative": ["7", 1], "latent_image": ["7", 2], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "denoise": denoise}}
-        graph["9"] = {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}}
-        graph["10"] = {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["9", 0], fps, "vidyra_i2v")}
-        return graph
-    raise ValueError(f"Unsupported img2video model: {model}")
+    unet_high = files.get("unet_high", "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors")
+    unet_low = files.get("unet_low", "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors")
+    half = max(1, steps // 2)
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_high, "weight_dtype": "default"}},
+        "2": {"class_type": "UNETLoader", "inputs": {"unet_name": unet_low, "weight_dtype": "default"}},
+        "3": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
+        "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["2", 0], "shift": 8.0}},
+        "5": {"class_type": "CLIPLoader", "inputs": {"clip_name1": files.get("clip", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"), "clip_name2": "", "type": "wan", "device": "default"}},
+        "6": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", "wan_2.1_vae.safetensors")}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": positive}},
+        "8": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 0], "text": negative}},
+        "9": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "10": {"class_type": "ImageScaleToTotalPixels", "inputs": {"upscale_method": "lanczos", "megapixels": (w * h) / 1e6, "image": ["9", 0]}},
+        "11": {"class_type": "WanImageToVideo", "inputs": {
+            "positive": ["7", 0], "negative": ["8", 0], "vae": ["6", 0],
+            "width": w, "height": h, "length": frames, "batch_size": 1,
+            "start_image": ["10", 0],
+        }},
+        # High-noise expert establishes motion/structure (steps 0..half).
+        "12": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["3", 0], "positive": ["11", 0], "negative": ["11", 1], "latent_image": ["11", 2], "add_noise": "enable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": 0, "end_at_step": half, "return_with_leftover_noise": "enable"}},
+        # Low-noise expert refines detail (steps half..end), fixing flicker.
+        "13": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["4", 0], "positive": ["11", 0], "negative": ["11", 1], "latent_image": ["12", 0], "add_noise": "disable", "noise_seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "start_at_step": half, "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
+        "14": {"class_type": "VAEDecode", "inputs": {"samples": ["13", 0], "vae": ["6", 0]}},
+        "15": {"class_type": "VHS_VideoCombine", "inputs": _vhs_combine(["14", 0], fps, "vidyra_i2v")},
+    }
 
 
 def _build_img2img(params: dict) -> dict:
@@ -359,6 +334,8 @@ def build_workflow(params: dict) -> dict:
         return _build_img2img(params)
     if tool == "img2video":
         return _build_img2video(params)
+    if tool == "txt2video":
+        return _build_txt2video(params)
     # "lipsync" never reaches here: the handler routes it to _run_lipsync,
     # which drives Wav2Lip directly instead of a ComfyUI node.
     raise ValueError(f"Unknown tool: {tool}")

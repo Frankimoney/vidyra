@@ -23,21 +23,21 @@ COPY deploy/runpod/requirements.txt /tmp/runpod-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/runpod-requirements.txt
 
 # ---- ComfyUI -----------------------------------------------------------
-# Pinned, not main: Wan I2V and camera-control node schemas change between
-# commits. Bump ARG COMFYUI_REF deliberately; the assertion below fails the
-# build if a bump drops a node this worker depends on.
+# Pinned, not main: Wan node schemas change between commits. Bump ARG
+# COMFYUI_REF deliberately; the assertion below fails the build if a bump drops
+# a node this worker depends on.
 ARG COMFYUI_REF=77c0f39e343aa83597d67cd95811df9e4fbfef2e
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI \
     && cd /ComfyUI \
     && git checkout --quiet "$COMFYUI_REF" \
     && test -f comfy_extras/nodes_wan.py \
-    && test -f comfy_extras/nodes_camera_trajectory.py \
-    && for node in WanImageToVideo WanFirstLastFrameToVideo WanCameraImageToVideo; do \
+    && test -f comfy_extras/nodes_hunyuan.py \
+    && for node in WanImageToVideo; do \
          grep -q "node_id=\"$node\"" comfy_extras/nodes_wan.py \
          || { echo "FATAL: pinned ComfyUI is missing $node"; exit 1; }; \
        done \
-    && grep -q 'node_id="WanCameraEmbedding"' comfy_extras/nodes_camera_trajectory.py \
-    && echo "ComfyUI $(git rev-parse --short HEAD): Wan nodes present" \
+    && grep -q 'node_id="EmptyHunyuanLatentVideo"' comfy_extras/nodes_hunyuan.py \
+    && echo "ComfyUI $(git rev-parse --short HEAD): Wan 2.2 nodes present" \
     && pip install --no-cache-dir -r requirements.txt
 
 # ---- Custom nodes (video output) ---------------------------------------
@@ -96,11 +96,32 @@ COPY deploy/runpod/worker_preflight.py /worker_preflight.py
 COPY deploy/runpod/setup_model_links.sh /setup_model_links.sh
 RUN chmod +x /setup_model_links.sh
 
+# ---- Render pipeline (merged: film pipeline runs in this same pod) -----
+# The film pipeline used to live on a separate CPU endpoint. It now shares this
+# GPU pod so one endpoint runs everything; StudioWorker drives ComfyUI in-process
+# (STUDIO_LOCAL=1) instead of submitting sub-jobs to itself, which would
+# deadlock behind the running job when workersMax=1.
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+COPY backend /app/backend
+COPY pipeline /app/pipeline
+COPY config /app/config
+COPY deploy/runpod/pipeline_handler.py /app/pipeline_handler.py
+COPY deploy/runpod/merged_handler.py /app/merged_handler.py
+COPY deploy/runpod/fetch_models.py /app/fetch_models.py
+RUN APP_ROOT=/app python /app/fetch_models.py
+
 ENV COMFY_URL=http://127.0.0.1:8188 \
     COMFY_INPUT=/ComfyUI/input \
     COMFY_OUTPUT=/ComfyUI/output \
+    COMFY_WORKER_PATH=/worker.py \
     MODEL_VOLUME=/runpod-volume/models \
-    PYTHONUNBUFFERED=1
+    PYTHONPATH=/app:/app/backend:/ \
+    PYTHONUNBUFFERED=1 \
+    STUDIO_LOCAL=1 \
+    APP_ENV=production \
+    VIDYRA_VOICE_DIR=/app/models/piper \
+    VIDYRA_MUSIC_DIR=/app/config/music
 
 # start.sh boots ComfyUI in the background then launches the runpod worker
 COPY deploy/runpod/start.sh /start.sh

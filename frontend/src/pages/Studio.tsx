@@ -69,29 +69,16 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-/** Last-resort camera list; the backend catalog normally supplies this. */
-const CAMERA_POSES = [
-  "Zoom In",
-  "Zoom Out",
-  "Pan Left",
-  "Pan Right",
-  "Pan Up",
-  "Pan Down",
-  "ClockWise (CW)",
-  "Anti Clockwise (ACW)",
-  "Static",
-];
-
 type ParamField =
   | { key: string; label: string; min: number; max: number; step?: number }
-  | { key: string; label: string; options: "aspect" | "camera_pose"; hint?: string };
+  | { key: string; label: string; options: "aspect"; hint?: string };
 
 type ParamMeta = {
   label: string;
   min?: number;
   max?: number;
   step?: number;
-  options?: "aspect" | "camera_pose";
+  options?: "aspect";
   hint?: string;
 };
 
@@ -110,8 +97,6 @@ const PARAM_META: Record<string, ParamMeta> = {
   steps: { label: "Steps", min: 1, max: 60, step: 1 },
   cfg: { label: "CFG", min: 1, max: 20, step: 0.5 },
   denoise: { label: "Denoise", min: 0, max: 1, step: 0.05 },
-  camera_pose: { label: "Camera move", options: "camera_pose", hint: "Stamped into the Wan 2.2 camera trajectory." },
-  camera_speed: { label: "Camera speed", min: 0.1, max: 2, step: 0.1 },
   exaggeration: { label: "Emotion", min: 0, max: 1, step: 0.05 },
   cfg_weight: { label: "Voice match", min: 0, max: 1, step: 0.05 },
   seed: { label: "Seed (same seed + prompt = same result)", min: 0, max: 99999999, step: 1 },
@@ -119,7 +104,7 @@ const PARAM_META: Record<string, ParamMeta> = {
 
 const PARAM_ORDER = [
   "aspect", "width", "height", "frames", "fps", "steps", "cfg", "denoise",
-  "camera_pose", "camera_speed", "exaggeration", "cfg_weight", "seed",
+  "exaggeration", "cfg_weight", "seed",
 ];
 
 function fieldsFor(defaults: Record<string, unknown> | undefined): ParamField[] {
@@ -153,13 +138,12 @@ function applyQuality(
 
 function fieldDefault(
   field: ParamField,
-  defaults: Record<string, unknown>,
-  cameraPoses: string[]
+  defaults: Record<string, unknown>
 ): number | string {
   const value = defaults[field.key];
   if ("options" in field) {
     if (typeof value === "string") return value;
-    return field.options === "aspect" ? "auto" : cameraPoses[0];
+    return "auto";
   }
   return typeof value === "number" ? value : (field.min + field.max) / 2;
 }
@@ -609,12 +593,6 @@ export default function Studio({
     () => (catalog?.modelParams?.[tool]?.[model] || {}) as Record<string, unknown>,
     [catalog, tool, model]
   );
-  const cameraPoses = useMemo(
-    () => catalog?.paramOptions?.camera_pose?.length
-      ? catalog.paramOptions.camera_pose
-      : CAMERA_POSES,
-    [catalog]
-  );
   const fields = useMemo(() => fieldsFor(modelDefaults), [modelDefaults]);
   const supportsQuality = "steps" in modelDefaults;
   const promptSupported = "prompt" in modelDefaults;
@@ -633,12 +611,12 @@ export default function Studio({
     const defaults = (catalog?.modelParams?.[tool]?.[firstModel] || {}) as Record<string, unknown>;
     const next: Record<string, number | string> = {};
     for (const f of fieldsFor(defaults)) {
-      next[f.key] = fieldDefault(f, defaults, cameraPoses);
+      next[f.key] = fieldDefault(f, defaults);
     }
     setParams(next);
     setRefs({});
     setNegative("negative" in defaults ? String(defaults.negative || "") : "");
-  }, [tool, catalog, cameraPoses]);
+  }, [tool, catalog]);
 
   function handleModelChange(m: string) {
     setModel(m);
@@ -646,7 +624,7 @@ export default function Studio({
     const defaults = (catalog?.modelParams?.[tool]?.[m] || {}) as Record<string, unknown>;
     const next: Record<string, number | string> = {};
     for (const f of fieldsFor(defaults)) {
-      next[f.key] = fieldDefault(f, defaults, cameraPoses);
+      next[f.key] = fieldDefault(f, defaults);
     }
     setParams(next);
     setNegative("negative" in defaults ? String(defaults.negative || "") : "");
@@ -903,41 +881,19 @@ export default function Studio({
                     return null;
                   }
                   if ("options" in f) {
-                    if (f.options === "aspect") {
-                      const opts = aspectsFromCatalog(catalog?.paramOptions);
-                      return (
-                        <AspectSelect
-                          key={f.key}
-                          id={`studio-${f.key}`}
-                          label={f.label}
-                          hint={f.hint}
-                          choices={opts}
-                          value={String(params[f.key] ?? "auto")}
-                          onChange={(v) =>
-                            setParams((prev) => ({ ...prev, [f.key]: v }))
-                          }
-                        />
-                      );
-                    }
+                    const opts = aspectsFromCatalog(catalog?.paramOptions);
                     return (
-                      <Field key={f.key} label={f.label}>
-                        <select
-                          className="input"
-                          value={String(params[f.key] ?? cameraPoses[0])}
-                          onChange={(e) =>
-                            setParams((prev) => ({ ...prev, [f.key]: e.target.value }))
-                          }
-                        >
-                          {cameraPoses.map((pose) => (
-                            <option key={pose} value={pose}>{pose}</option>
-                          ))}
-                        </select>
-                        {f.hint && (
-                          <p className="faint" style={{ fontSize: "0.78rem", margin: "2px 0 0" }}>
-                            {f.hint}
-                          </p>
-                        )}
-                      </Field>
+                      <AspectSelect
+                        key={f.key}
+                        id={`studio-${f.key}`}
+                        label={f.label}
+                        hint={f.hint}
+                        choices={opts}
+                        value={String(params[f.key] ?? "auto")}
+                        onChange={(v) =>
+                          setParams((prev) => ({ ...prev, [f.key]: v }))
+                        }
+                      />
                     );
                   }
                   return (

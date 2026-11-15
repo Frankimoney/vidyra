@@ -35,13 +35,12 @@ REQUIRED_NODES = {
     "UNETLoader": ["unet_name", "weight_dtype"],
     "CheckpointLoaderSimple": ["ckpt_name"],
     "CLIPLoader": ["clip_name1", "clip_name2", "type", "device"],
-    "CLIPVisionLoader": ["clip_name"],
     "VAELoader": ["vae_name"],
     "LoraLoader": ["model", "clip", "lora_name", "strength_model", "strength_clip"],
     "CLIPTextEncode": ["clip", "text"],
-    "CLIPVisionEncode": ["clip_vision", "image", "crop"],
     "EmptyLatentImage": ["width", "height", "batch_size"],
     "EmptySD3LatentImage": ["width", "height", "batch_size"],
+    "EmptyHunyuanLatentVideo": ["width", "height", "length", "batch_size"],
     "LoadImage": ["image"],
     "ImageScaleToTotalPixels": ["upscale_method", "megapixels", "image"],
     "ModelSamplingSD3": ["model", "shift"],
@@ -56,16 +55,7 @@ REQUIRED_NODES = {
     ],
     "WanImageToVideo": [
         "width", "height", "length", "batch_size", "positive", "negative",
-        "vae", "start_image", "clip_vision_output",
-    ],
-    "WanFirstLastFrameToVideo": [
-        "width", "height", "length", "batch_size", "positive", "negative",
-        "vae", "start_image", "end_image", "clip_vision_start_image",
-    ],
-    "WanCameraEmbedding": ["camera_pose", "width", "height", "length", "speed"],
-    "WanCameraImageToVideo": [
-        "positive", "negative", "vae", "width", "height", "length",
-        "batch_size", "start_image", "camera_conditions",
+        "vae", "start_image",
     ],
     "VAEDecode": ["samples", "vae"],
     "SaveImage": ["images", "filename_prefix"],
@@ -89,7 +79,6 @@ MODEL_INPUTS = {
     "clip": ("CLIPLoader", "clip_name1"),
     "clip1": ("CLIPLoader", "clip_name1"),
     "clip2": ("CLIPLoader", "clip_name2"),
-    "clip_vision": ("CLIPVisionLoader", "clip_name"),
     "vae": ("VAELoader", "vae_name"),
 }
 

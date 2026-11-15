@@ -28,4 +28,6 @@ for i in $(seq 1 120); do
   sleep 10
 done
 
-exec python /worker.py
+# One pod runs everything: the film pipeline drives ComfyUI in-process
+# (STUDIO_LOCAL=1) and standalone Studio runs hit the same handler.
+exec python /app/merged_handler.py

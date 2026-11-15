@@ -451,7 +451,6 @@ export interface StudioCatalog {
   paramOptions?: {
     aspect?: string[];
     aspectLabels?: Record<string, string>;
-    camera_pose?: string[];
   };
 }
 

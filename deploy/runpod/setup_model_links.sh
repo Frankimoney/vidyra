@@ -2,15 +2,14 @@
 # Symlink models from the mounted network volume into ComfyUI's model dirs.
 # Place checkpoints/loras under $MODEL_VOLUME/<kind>/ then run this.
 #
-# Current Flow-like Studio bundle (keep these exact filenames; they are the
-# names in worker.py's MODEL_FILES manifest):
+# Current Studio bundle (keep these exact filenames; they are the names in
+# worker.py's MODEL_FILES manifest):
 #   checkpoints/     sd_xl_base_1.0.safetensors
-#   diffusion_models/ wan2.1_i2v_480p_14B_fp8_scaled.safetensors
-#                    wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors
-#                    wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors
-#                    wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors
+#   diffusion_models/ wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors
+#                    wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors
+#                    wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors
+#                    wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors
 #   text_encoders/   umt5_xxl_fp8_e4m3fn_scaled.safetensors
-#   clip_vision/     clip_vision_h.safetensors
 #   vae/             wan_2.1_vae.safetensors
 # worker_preflight.py verifies this bundle before a job is accepted.
 set -e

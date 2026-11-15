@@ -82,6 +82,30 @@ def rest_studio_endpoint(settings: Settings) -> None:
         pass
 
 
+_COMFY_WORKER = None
+
+
+def _load_comfy_worker():
+    """Load the ComfyUI driver module (worker.py) for in-pod local runs.
+
+    In merged mode the film pipeline and ComfyUI share one pod, so a studio pass
+    must drive ComfyUI directly instead of submitting to the endpoint (which
+    would queue behind the job that is already running).
+    """
+    global _COMFY_WORKER
+    if _COMFY_WORKER is not None:
+        return _COMFY_WORKER
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(os.getenv("COMFY_WORKER_PATH", "/worker.py"))
+    spec = importlib.util.spec_from_file_location("comfy_worker", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _COMFY_WORKER = module
+    return module
+
+
 def _pod_meta(output) -> dict:
     """The pod's own return value, as a dict (RunPod may hand it back as JSON)."""
     if isinstance(output, str):
@@ -112,6 +136,8 @@ class StudioWorker:
 
     def wake(self) -> None:
         """Pin a Studio worker for the duration of the caller's work."""
+        if getattr(self.settings, "studio_local", False):
+            return  # merged mode: ComfyUI is already in this pod
         with self._wake_lock:
             self._wake_depth += 1
             first = self._wake_depth == 1
@@ -120,6 +146,8 @@ class StudioWorker:
 
     def rest(self) -> None:
         """Release the pinned Studio worker once no caller needs it."""
+        if getattr(self.settings, "studio_local", False):
+            return  # merged mode: never scale the shared pod down mid-job
         with self._wake_lock:
             self._wake_depth = max(0, self._wake_depth - 1)
             last = self._wake_depth == 0
@@ -161,6 +189,9 @@ class StudioWorker:
             tool = (run.get("tool") or "").strip()
             if self.settings.runpod_fake:
                 self._run_fake(run_id, run, tool)
+                return
+            if getattr(self.settings, "studio_local", False):
+                self._run_local(run_id, run, tool, on_progress=on_progress)
                 return
             if not self.settings.runpod_enabled:
                 self._fail(
@@ -271,6 +302,42 @@ class StudioWorker:
             progress=100,
             message="Result ready",
             output=output,
+        )
+
+    def _run_local(self, run_id: str, run: dict, tool: str, on_progress=None):
+        """Run one pass on the pod's own ComfyUI (merged mode).
+
+        Reuses the GPU worker's own handler so the workflow graph, artifact
+        streaming, and callback token are identical to a remote run; only the
+        transport changes (in-process call instead of a RunPod submit).
+        """
+        studio_service.update_run(
+            run_id,
+            status="processing",
+            stage="generating",
+            progress=5,
+            message="Rendering on local GPU",
+        )
+        payload = self._build_payload(run_id, run)
+        worker = _load_comfy_worker()
+        output = worker.handler({"input": payload})
+        if isinstance(output, dict) and output.get("status") == "error":
+            raise StudioError(f"GPU run failed: {output.get('error')}")
+        if on_progress:
+            on_progress(90, "Retrieving output")
+        studio_service.update_run(
+            run_id, stage="finalizing", progress=90, message="Retrieving output"
+        )
+        result = self._finalize(run_id, run, _pod_meta(output))
+        if result is None:
+            raise StudioError("GPU run produced no artifacts.")
+        studio_service.update_run(
+            run_id,
+            status="completed",
+            stage="completed",
+            progress=100,
+            message="Result ready",
+            output=result,
         )
 
     def _build_payload(self, run_id: str, run: dict) -> dict:

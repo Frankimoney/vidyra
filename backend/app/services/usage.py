@@ -19,9 +19,11 @@ COLLECTION = "usage"
 #: the ledger stores the number it used, so history never shifts retroactively.
 PRICE_PER_RUN: dict[str, float] = {
     "sdxl": 0.012,
-    "wan21-i2v": 0.090,
-    "wan21-flf2v": 0.090,
-    "wan22-cam-i2v": 0.120,
+    "sdxl-character": 0.015,
+    "wan22-i2v": 0.120,
+    "wan22-t2v": 0.120,
+    "wav2lip": 0.030,
+    "chatterbox-turbo": 0.010,
 }
 DEFAULT_PRICE = 0.050
 

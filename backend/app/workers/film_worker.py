@@ -44,17 +44,16 @@ _IMAGE_PARAMS = {
     "sdxl": {"width": 896, "height": 1600, "steps": 30, "cfg": 7.0},
 }
 _VIDEO_PARAMS = {
-    "wan21-i2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0},
-    "wan21-flf2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0},
-    # Wan2.2 camera control runs a two-pass 14B (high/low noise) with a gentler
-    # cfg, mirroring the official ComfyUI Fun Camera workflow.
-    "wan22-cam-i2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 3.5, "denoise": 1.0},
+    # Wan2.2 14B runs a two-pass MoE denoise (high/low noise experts) at a gentler
+    # cfg, mirroring the official ComfyUI Wan 2.2 14B T2V/I2V templates.
+    "wan22-i2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 4.0, "denoise": 1.0},
+    "wan22-t2v": {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 4.0, "denoise": 1.0},
 }
 # Lip-sync a full moving shot (Wav2Lip class) — no diffusion knobs, just framing.
 _ACTING_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16}
 _DEFAULT_IMAGE_PARAMS = {"width": 896, "height": 1600, "steps": 30, "cfg": 7.0}
 _IMG2IMG_PARAMS = {"width": 896, "height": 1600, "steps": 30, "cfg": 6.0, "denoise": 0.45}
-_DEFAULT_VIDEO_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0}
+_DEFAULT_VIDEO_PARAMS = {"width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 4.0, "denoise": 1.0}
 
 #: Films and podcasts are portrait-first products (the writers are prompted for
 #: "9:16 vertical"), so this is the shape "auto" resolves to for them.
@@ -137,43 +136,6 @@ _SHOT_FALLBACKS = [
     "an orbit around the subject",
 ]
 
-# Wan2.2 camera-control vocabulary (WanCameraEmbedding's camera_pose options),
-# ordered so the most specific match wins.
-_CAMERA_MOVES = [
-    ("ClockWise (CW)", ("clockwise", "orbit", "circular", "around the subject", "round the subject", "arc around")),
-    ("Anti Clockwise (ACW)", ("anticlockwise", "anti-clockwise", "counterclockwise", "counter-clockwise", "reverse orbit")),
-    ("Zoom In", ("zoom in", "zoom-in", "push in", "push-in", "slow in", "dolly in", "dolly-in", "close up", "close-up", "creep in")),
-    ("Zoom Out", ("zoom out", "zoom-out", "pull back", "pull-back", "push out", "dolly out", "dolly-out", "wide shot", "wide ")),
-    ("Pan Left", ("pan left", "track left", "truck left", "move left", "crane left")),
-    ("Pan Right", ("pan right", "pan across", "track right", "truck right", "move right", "crane right")),
-    ("Pan Up", ("pan up", "tilt up", "crane up", "low angle", "rising", "lift up")),
-    ("Pan Down", ("pan down", "tilt down", "crane down", "high angle", "pulling down")),
-]
-
-
-def _camera_params(shot: str) -> tuple:
-    """Map a director's camera-move text ("a slow push-in") onto the Wan2.2
-    camera-control vocabulary plus a speed multiplier. Unrecognized direction
-    degrades to a gentle Zoom In so shots are never static by accident."""
-    text = (shot or "").lower()
-    if not text.strip():
-        return "Zoom In", 1.0
-    pose = None
-    for candidate, keys in _CAMERA_MOVES:
-        if any(k in text for k in keys):
-            pose = candidate
-            break
-    if pose is None:
-        if any(k in text for k in ("static", "still ", "locked off", "steady", "fixed")):
-            pose = "Static"
-        else:
-            pose = "Zoom In"
-    speed = 1.0
-    if any(k in text for k in ("fast", "quick", "rapid", "speedy", "energetic")):
-        speed = 1.6
-    elif any(k in text for k in ("slow", "gentle", "subtle", "soft ", "calm")):
-        speed = 0.6
-    return pose, speed
 _ALLOWED_TRANSITIONS = {
     "Auto", "fade", "slideleft", "slideright", "wipeleft", "wiperight", "zoomin",
 }
@@ -982,17 +944,12 @@ class FilmWorker:
         )
 
     def _video_params(self, video_model: str, shot_text: str = "", duration=None) -> dict:
-        """Per-model img2video params. For the Wan2.2 camera-control model the
-        scene's own camera move is stamped in as an explicit trajectory. A
-        per-scene ``duration`` (seconds) overrides the default frame count."""
+        """Per-model img2video params. A per-scene ``duration`` (seconds)
+        overrides the default frame count."""
         params = dict(_VIDEO_PARAMS.get(video_model, _DEFAULT_VIDEO_PARAMS))
         params["frames"] = _scene_frames(
             duration, params.get("fps", 16), params.get("frames", 81)
         )
-        if video_model == "wan22-cam-i2v":
-            pose, speed = _camera_params(shot_text)
-            params["camera_pose"] = pose
-            params["camera_speed"] = speed
         return params
 
     def _scene_script(self, sc: dict) -> str:

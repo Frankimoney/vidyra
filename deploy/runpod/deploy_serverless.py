@@ -202,6 +202,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--merged", action="store_true",
+                        help="deploy ONE GPU endpoint that runs both the film "
+                             "pipeline and ComfyUI (STUDIO_LOCAL=1)")
     parser.add_argument("--list-volumes", action="store_true")
     parser.add_argument("--create-volume", action="store_true",
                         help="create a network volume, print its ID, and exit")
@@ -293,17 +296,21 @@ def main() -> int:
         "PYTHONUNBUFFERED": "1",
     }
 
-    studio_template = {
-        "name": STUDIO_TEMPLATE,
-        "imageName": STUDIO_IMAGE,
-        "isServerless": True,
-        "category": "NVIDIA",
-        "containerDiskInGb": 50,
-        "volumeInGb": 0,
-        "volumeMountPath": "/runpod-volume",
-        "env": studio_env,
+    pipeline_env = {
+        "APP_ENV": "production",
+        "BACKGROUND_LOOPS": "false",
+        "MAX_CONCURRENCY": "1",
+        "STORAGE_BACKEND": "r2",
+        "PUBLIC_URL": public_url,
+        "SIGNED_URL_SECRET": signed_url_secret,
+        "WHISPER_BACKEND": "runpod",
+        "RUNPOD_API_KEY": api_key,
+        "RUNPOD_TIMEOUT_MINUTES": env.get("RUNPOD_TIMEOUT_MINUTES", "15"),
     }
-    studio_template_id = upsert_template(api_key, studio_template, args.dry_run)
+    pipeline_env.update(local_firebase_env(env))
+    pipeline_env.update(local_r2_env(env))
+    if env.get("GEMINI_API_KEY"):
+        pipeline_env["GEMINI_API_KEY"] = env["GEMINI_API_KEY"]
 
     # A single GPU type (e.g. A100 in one region) throttles whenever that
     # region has no capacity, which stalls every render at 0%. Offer a spread
@@ -321,6 +328,75 @@ def main() -> int:
         ).split(",")
         if item.strip()
     ]
+
+    # Merged mode: one GPU endpoint runs the film pipeline AND ComfyUI. The pod
+    # carries both the Studio and pipeline env sets; STUDIO_LOCAL=1 makes the
+    # film pipeline drive ComfyUI in-process instead of submitting to itself.
+    if args.merged:
+        merged_env = dict(studio_env)
+        merged_env.update({key: value for key, value in pipeline_env.items() if value})
+        merged_env["STUDIO_LOCAL"] = "1"
+        merged_env["COMFY_WORKER_PATH"] = "/worker.py"
+        merged_template = {
+            "name": STUDIO_TEMPLATE,
+            "imageName": STUDIO_IMAGE,
+            "isServerless": True,
+            "category": "NVIDIA",
+            "containerDiskInGb": 50,
+            "volumeInGb": 0,
+            "volumeMountPath": "/runpod-volume",
+            "env": merged_env,
+        }
+        merged_template_id = upsert_template(api_key, merged_template, args.dry_run)
+        merged_endpoint = {
+            "name": STUDIO_ENDPOINT,
+            "templateId": merged_template_id,
+            "computeType": "GPU",
+            "gpuTypeIds": studio_gpu_types,
+            "gpuCount": 1,
+            "workersMin": 0,
+            "workersMax": 1,
+            "idleTimeout": int(env.get("RUNPOD_STUDIO_IDLE_TIMEOUT", "180")),
+            "executionTimeoutMs": int(env.get("RUNPOD_STUDIO_EXEC_TIMEOUT_MIN", "30")) * 60 * 1000,
+            "networkVolumeId": volume_id or "<network-volume-id>",
+            "dataCenterIds": [data_center],
+            "minCudaVersion": "12.8",
+        }
+        merged_endpoint_id = upsert_endpoint(api_key, merged_endpoint, args.dry_run)
+        if not args.dry_run:
+            OUTPUT_FILE.write_text(
+                "\n".join(
+                    [
+                        f"RUNPOD_ENDPOINT_ID={merged_endpoint_id}",
+                        f"RUNPOD_STUDIO_ENDPOINT_ID={merged_endpoint_id}",
+                        f"RUNPOD_PIPELINE_ENDPOINT_ID={merged_endpoint_id}",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            print(f"\nWrote {OUTPUT_FILE}")
+            print("\nMerged endpoint deployed. Set these on the Render service, then restart it:")
+            print(f"  RUNPOD_API_KEY=<same key from {args.env_file}>")
+            print(f"  RUNPOD_ENDPOINT_ID={merged_endpoint_id}")
+            print(f"  RUNPOD_STUDIO_ENDPOINT_ID={merged_endpoint_id}")
+            print(f"  RUNPOD_PIPELINE_ENDPOINT_ID={merged_endpoint_id}")
+            if not env.get("GEMINI_API_KEY"):
+                print("  GEMINI_API_KEY=<your Gemini key>")
+        return 0
+
+    studio_template = {
+        "name": STUDIO_TEMPLATE,
+        "imageName": STUDIO_IMAGE,
+        "isServerless": True,
+        "category": "NVIDIA",
+        "containerDiskInGb": 50,
+        "volumeInGb": 0,
+        "volumeMountPath": "/runpod-volume",
+        "env": studio_env,
+    }
+    studio_template_id = upsert_template(api_key, studio_template, args.dry_run)
+
     studio_endpoint = {
         "name": STUDIO_ENDPOINT,
         "templateId": studio_template_id,
@@ -341,22 +417,7 @@ def main() -> int:
     }
     studio_endpoint_id = upsert_endpoint(api_key, studio_endpoint, args.dry_run)
 
-    pipeline_env = {
-        "APP_ENV": "production",
-        "BACKGROUND_LOOPS": "false",
-        "MAX_CONCURRENCY": "1",
-        "STORAGE_BACKEND": "r2",
-        "PUBLIC_URL": public_url,
-        "SIGNED_URL_SECRET": signed_url_secret,
-        "WHISPER_BACKEND": "runpod",
-        "RUNPOD_API_KEY": api_key,
-        "RUNPOD_STUDIO_ENDPOINT_ID": studio_endpoint_id,
-        "RUNPOD_TIMEOUT_MINUTES": env.get("RUNPOD_TIMEOUT_MINUTES", "15"),
-    }
-    pipeline_env.update(local_firebase_env(env))
-    pipeline_env.update(local_r2_env(env))
-    if env.get("GEMINI_API_KEY"):
-        pipeline_env["GEMINI_API_KEY"] = env["GEMINI_API_KEY"]
+    pipeline_env["RUNPOD_STUDIO_ENDPOINT_ID"] = studio_endpoint_id
     pipeline_env = {key: value for key, value in pipeline_env.items() if value}
 
     missing = [

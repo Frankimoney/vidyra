@@ -38,9 +38,11 @@ def main() -> int:
         check("catalog 200", r.status_code == 200, str(r.status_code))
         cat = r.json()
         check("studio enabled (fake)", cat.get("enabled") and cat.get("fake"))
-        check("6 tools", len(cat.get("tools", [])) == 6, str(len(cat.get("tools", []))))
+        check("7 tools", len(cat.get("tools", [])) == 7, str(len(cat.get("tools", []))))
         check("img2img tool listed",
               any(t.get("tool") == "img2img" for t in cat.get("tools", [])))
+        check("txt2video tool listed",
+              any(t.get("tool") == "txt2video" for t in cat.get("tools", [])))
         check("lipsync tool listed",
               any(t.get("tool") == "lipsync" for t in cat.get("tools", [])))
         check("portrait-lock character tool listed",
@@ -55,13 +57,10 @@ def main() -> int:
         voice = params.get("voiceclone", {}).get("chatterbox-turbo", {})
         check("Chatterbox has no seed/negative controls",
               "seed" not in voice and "negative" not in voice, str(voice))
-        camera = params.get("img2video", {}).get("wan22-cam-i2v", {})
-        check("camera model exposes trajectory controls",
-              "camera_pose" in camera and "camera_speed" in camera, str(camera))
-        check("camera model hides unused denoise", "denoise" not in camera, str(camera))
-        check("catalog publishes camera pose choices",
-              "Zoom In" in cat.get("paramOptions", {}).get("camera_pose", []),
-              str(cat.get("paramOptions", {}).get("camera_pose")))
+        i2v = params.get("img2video", {}).get("wan22-i2v", {})
+        check("Wan 2.2 I2V exposes frames/fps/cfg", "frames" in i2v and "fps" in i2v and "cfg" in i2v, str(i2v))
+        t2v = params.get("txt2video", {}).get("wan22-t2v", {})
+        check("Wan 2.2 T2V exposes frames/fps/cfg", "frames" in t2v and "fps" in t2v and "cfg" in t2v, str(t2v))
 
         print("create txt2img run:")
         r = client.post(
@@ -123,7 +122,7 @@ def main() -> int:
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "img2video", "model": "wan21-i2v", "prompt": "animate", "refs": []},
+            json={"tool": "img2video", "model": "wan22-i2v", "prompt": "animate", "refs": []},
         )
         check("rejects missing ref", r.status_code == 400, str(r.status_code))
 
@@ -175,7 +174,7 @@ def main() -> int:
             headers=H,
             json={
                 "tool": "img2video",
-                "model": "wan21-i2v",
+                "model": "wan22-i2v",
                 "prompt": "subtle camera push-in",
                 "params": {"width": 320, "height": 192, "frames": 24},
                 "refs": [{"path": src_path, "role": "image"}],
@@ -194,63 +193,26 @@ def main() -> int:
         check("video artifact is video", vprimary.get("kind") == "video", str(vprimary.get("kind")))
         check("video has duration", (vprimary.get("duration") or 0) > 0, str(vprimary.get("duration")))
 
-        print("img2video optional roles (start + end + reference):")
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={
-                "tool": "img2video",
-                "model": "wan21-flf2v",
-                "prompt": "smooth morph",
-                "refs": [
-                    {"path": src_path, "role": "image"},
-                    {"path": src_path, "role": "end_image"},
-                    {"path": src_path, "role": "reference"},
-                ],
-            },
-        )
-        check("flf2v start+end+ref accepted", r.status_code == 201, r.text[:200])
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={
-                "tool": "img2video",
-                "model": "wan21-i2v",
-                "prompt": "x",
-                "refs": [{"path": src_path, "role": "end_image"}],
-            },
-        )
-        check("missing required start rejected", r.status_code == 400, str(r.status_code))
-
         print("per-model ref slots:")
         mr = client.get("/api/catalog/studio", headers=H).json().get("modelRefs", {})
-        i2v_roles = [s["role"] for s in mr.get("img2video", {}).get("wan21-i2v", [])]
-        flf_roles = [s["role"] for s in mr.get("img2video", {}).get("wan21-flf2v", [])]
-        cam_roles = [s["role"] for s in mr.get("img2video", {}).get("wan22-cam-i2v", [])]
-        check("i2v slots = start + reference", i2v_roles == ["image", "reference"], str(i2v_roles))
-        check("flf2v slots = start + end + reference", flf_roles == ["image", "end_image", "reference"], str(flf_roles))
-        check("cam-i2v slots = start only", cam_roles == ["image"], str(cam_roles))
+        i2v_roles = [s["role"] for s in mr.get("img2video", {}).get("wan22-i2v", [])]
+        t2v_roles = [s["role"] for s in mr.get("txt2video", {}).get("wan22-t2v", [])]
+        check("i2v slots = start only", i2v_roles == ["image"], str(i2v_roles))
+        check("t2v needs no refs", t2v_roles == [], str(t2v_roles))
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "img2video", "model": "wan22-cam-i2v", "prompt": "x",
-                  "refs": [{"path": src_path, "role": "end_image"}]},
-        )
-        check("cam-i2v rejects end-only", r.status_code == 400, str(r.status_code))
-        r = client.post(
-            "/api/studio/runs",
-            headers=H,
-            json={"tool": "img2video", "model": "wan22-cam-i2v", "prompt": "x",
+            json={"tool": "img2video", "model": "wan22-i2v", "prompt": "x",
                   "refs": [{"path": src_path, "role": "image"}]},
         )
-        check("cam-i2v accepts start", r.status_code == 201, r.text[:200])
+        check("i2v accepts start", r.status_code == 201, r.text[:200])
 
         print("aspect ratio drives the real canvas (fake render, checked end to end):")
         for ratio, want_portrait in (("16:9", False), ("1:1", False), ("4:5", True)):
             r = client.post(
                 "/api/studio/runs",
                 headers=H,
-                json={"tool": "img2video", "model": "wan21-i2v", "prompt": "a dancer",
+                json={"tool": "img2video", "model": "wan22-i2v", "prompt": "a dancer",
                       "params": {"frames": 24, "fps": 16, "aspect": ratio, "fit": "pad"},
                       "refs": [{"path": src_path, "role": "image"}]},
             )
@@ -277,7 +239,7 @@ def main() -> int:
         r = client.post(
             "/api/studio/runs",
             headers=H,
-            json={"tool": "img2video", "model": "wan21-i2v", "prompt": "a dancer",
+            json={"tool": "img2video", "model": "wan22-i2v", "prompt": "a dancer",
                   "params": {"aspect": "7:3"},
                   "refs": [{"path": src_path, "role": "image"}]},
         )

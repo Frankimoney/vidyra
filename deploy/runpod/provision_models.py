@@ -8,7 +8,9 @@ image:
     python provision_models.py --dest /runpod-volume/models
 
 Existing non-empty files are skipped, so a retry resumes without re-downloading
-completed files.
+completed files. Stale files from earlier bundles (Wan 2.1 video + Fun Camera,
+clip-vision) are pruned by default so the volume never has to hold both the old
+and new weights at once; pass --no-prune to keep them.
 """
 
 from __future__ import annotations
@@ -20,8 +22,7 @@ import urllib.request
 from pathlib import Path
 
 HF = "https://huggingface.co"
-WAN21 = f"{HF}/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files"
-WAN22 = f"{HF}/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files"
+WAN22 = f"{HF}/Comfy-Org/Wan-2.2/resolve/main/split_files"
 
 MODELS = {
     "checkpoints": {
@@ -31,33 +32,49 @@ MODELS = {
         ),
     },
     "diffusion_models": {
-        "wan2.1_i2v_480p_14B_fp8_scaled.safetensors": (
-            f"{WAN21}/diffusion_models/wan2.1_i2v_480p_14B_fp8_scaled.safetensors"
+        # Wan2.2 14B video: two-pass MoE experts (high/low noise), fp8, on the
+        # Wan2.1 16-channel VAE.
+        "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors": (
+            f"{WAN22}/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors"
         ),
-        "wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors": (
-            f"{WAN21}/diffusion_models/wan2.1_flf2v_720p_14B_fp8_e4m3fn.safetensors"
+        "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors": (
+            f"{WAN22}/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors"
         ),
-        "wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors": (
-            f"{WAN22}/diffusion_models/wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors"
+        "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors": (
+            f"{WAN22}/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
         ),
-        "wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors": (
-            f"{WAN22}/diffusion_models/wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors"
+        "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors": (
+            f"{WAN22}/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
         ),
     },
     "text_encoders": {
         "umt5_xxl_fp8_e4m3fn_scaled.safetensors": (
-            f"{WAN21}/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-        ),
-    },
-    "clip_vision": {
-        "clip_vision_h.safetensors": (
-            f"{WAN21}/clip_vision/clip_vision_h.safetensors"
+            f"{WAN22}/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
         ),
     },
     "vae": {
-        "wan_2.1_vae.safetensors": f"{WAN21}/vae/wan_2.1_vae.safetensors",
+        "wan_2.1_vae.safetensors": f"{WAN22}/vae/wan_2.1_vae.safetensors",
     },
 }
+
+# Files from earlier bundles that are no longer referenced by any workflow.
+# Globs are relative to --dest.
+STALE = (
+    "diffusion_models/wan2.1_*.safetensors",
+    "diffusion_models/wan2.2_fun_*.safetensors",
+    "clip_vision/clip_vision_h.safetensors",
+)
+
+
+def prune(dest: Path) -> None:
+    for pattern in STALE:
+        for target in sorted(dest.glob(pattern)):
+            size = target.stat().st_size
+            target.unlink()
+            print(f"prune {target.relative_to(dest)} ({size / 1e9:.1f} GB)")
+    for part in sorted(dest.glob("**/*.part")):
+        part.unlink()
+        print(f"prune {part.relative_to(dest)} (partial)")
 
 
 def download(url: str, target: Path, force: bool) -> None:
@@ -94,7 +111,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dest", type=Path, default=Path("/runpod-volume/models"))
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--no-prune",
+        dest="prune",
+        action="store_false",
+        help="keep stale Wan 2.1 / Fun Camera / clip-vision files instead of deleting them",
+    )
     args = parser.parse_args()
+
+    if args.prune:
+        prune(args.dest)
 
     total = 0
     for kind, files in MODELS.items():

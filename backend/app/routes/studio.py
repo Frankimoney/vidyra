@@ -34,20 +34,6 @@ router = APIRouter()
 # Enum choices exposed to the UI and enforced in _normalize_params.
 STUDIO_ENUM_VALUES = {"aspect": tuple(aspect_lib.ASPECT_CHOICES)}
 
-# WanCameraEmbedding's accepted trajectory names, shared with the Studio UI so
-# the camera model's extra controls are not hardcoded in the frontend.
-CAMERA_POSES = (
-    "Zoom In",
-    "Zoom Out",
-    "Pan Left",
-    "Pan Right",
-    "Pan Up",
-    "Pan Down",
-    "ClockWise (CW)",
-    "Anti Clockwise (ACW)",
-    "Static",
-)
-
 # tool -> {model -> default params} (conservative, cost-aware defaults)
 # NOTE: keys are the complete set of controls the model actually honors. The
 # Studio UI derives its controls from these defaults, so unused knobs (e.g.
@@ -87,19 +73,18 @@ TOOL_MODELS = {
         "wav2lip": {},
     },
     "img2video": {
-        "wan21-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
-        "wan21-flf2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 5.0, "denoise": 1.0, "seed": 0, "prompt": "", "negative": ""},
-        # Wan2.2 Fun Camera Control: an explicit camera trajectory (pan/zoom/
-        # orbit) is stamped into the conditioning instead of only being hinted
-        # in the prompt text.
-        "wan22-cam-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 3.5, "camera_pose": "Zoom In", "camera_speed": 1.0, "seed": 0, "prompt": "", "negative": ""},
+        # Wan2.2 14B I2V: two-pass MoE (high/low noise experts) fp8, driven from
+        # a single start frame.
+        "wan22-i2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 4.0, "seed": 0, "prompt": "", "negative": ""},
+    },
+    "txt2video": {
+        # Wan2.2 14B T2V: same two-pass MoE pipeline, latent seeded from text.
+        "wan22-t2v": {"aspect": "auto", "width": 832, "height": 480, "frames": 81, "fps": 16, "steps": 20, "cfg": 4.0, "seed": 0, "prompt": "", "negative": ""},
     },
 }
 
 # Media ref slots per tool/model. Each slot: role, label, required, kind.
 _START = {"role": "image", "label": "Start frame", "required": True, "kind": "image"}
-_END = {"role": "end_image", "label": "End frame", "required": False, "kind": "image"}
-_REFERENCE = {"role": "reference", "label": "Reference image", "required": False, "kind": "image"}
 _IMG2IMG_REF = {"role": "reference", "label": "Reference image", "required": True, "kind": "image"}
 _LIPSYNC_REFS = [
     {"role": "video", "label": "Character video", "required": True, "kind": "video"},
@@ -114,13 +99,10 @@ MODEL_REFS = {
     "voiceclone": {"chatterbox-turbo": [{"role": "audio", "label": "Voice sample (5-30s)", "required": True, "kind": "audio"}]},
     "lipsync": {"wav2lip": _LIPSYNC_REFS},
     "img2video": {
-        # wan21-i2v uses a start frame (+ optional clip-vision reference guide).
-        "wan21-i2v": [_START, _REFERENCE],
-        # flf2v interpolates first -> last frame, with an optional reference.
-        "wan21-flf2v": [_START, _END, _REFERENCE],
-        # Wan2.2 camera control animates a single start frame along a camera path.
-        "wan22-cam-i2v": [_START],
+        # wan22-i2v animates a single start frame with Wan2.2 14B I2V.
+        "wan22-i2v": [_START],
     },
+    "txt2video": {"wan22-t2v": []},
 }
 
 # Tool-level default (union of slots) for older clients / fallback validation.
@@ -130,7 +112,8 @@ TOOL_REFS = {
     "character": [_IMG2IMG_REF],
     "voiceclone": [{"role": "audio", "label": "Voice sample (5-30s)", "required": True, "kind": "audio"}],
     "lipsync": _LIPSYNC_REFS,
-    "img2video": [_START, _END, _REFERENCE],
+    "img2video": [_START],
+    "txt2video": [],
 }
 
 _TASK_PATHS = ["/studio/artifacts/{run_id}", "/studio/progress/{run_id}"]
@@ -190,8 +173,17 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
                 "promptHint": 'How the still should move — e.g. “slow push-in”, “hair in the wind”, “camera drifts left”…',
                 "label": "Image to Video",
                 "kind": "video",
-                "models": ["wan21-i2v", "wan21-flf2v", "wan22-cam-i2v"],
+                "models": ["wan22-i2v"],
                 "refs": TOOL_REFS["img2video"],
+            },
+            {
+                "tool": "txt2video",
+                "promptLabel": 'Scene prompt',
+                "promptHint": 'Describe the shot end to end — subject, action, setting, lighting, camera — e.g. “a lone astronaut walks across red dunes at dusk, slow dolly-in, cinematic”…',
+                "label": "Text to Video",
+                "kind": "video",
+                "models": ["wan22-t2v"],
+                "refs": TOOL_REFS["txt2video"],
             },
             {
                 "tool": "lipsync",
@@ -210,16 +202,14 @@ async def studio_catalog(request: Request, user: CurrentUser = Depends(get_curre
             "sdxl-character": "SDXL Character",
             "chatterbox-turbo": "Chatterbox Turbo",
             "wav2lip": "Wav2Lip",
-            "wan21-i2v": "Wan 2.1 Image to Video",
-            "wan21-flf2v": "Wan 2.1 First/Last Frame",
-            "wan22-cam-i2v": "Wan 2.2 Camera Control",
+            "wan22-i2v": "Wan 2.2 Image to Video",
+            "wan22-t2v": "Wan 2.2 Text to Video",
         },
         # Choice lists for the enum-style params, so the Studio UI never
         # hardcodes a list that pipeline.aspect owns.
         "paramOptions": {
             "aspect": list(aspect_lib.ASPECT_CHOICES),
             "aspectLabels": dict(aspect_lib.ASPECT_LABELS),
-            "camera_pose": list(CAMERA_POSES),
         },
         # Conservative per-run USD estimates, shown before the user spends.
         "prices": dict(usage_service.PRICE_PER_RUN),
@@ -687,7 +677,6 @@ def _param_bounds(tool: str, model: str) -> dict:
         "seed": (0, 99999999),
         "exaggeration": (0.0, 1.0),
         "cfg_weight": (0.0, 1.0),
-        "camera_speed": (0.1, 2.0),
     }
 
 
@@ -729,11 +718,6 @@ def _normalize_params(params: dict, defaults: dict, bounds: dict | None = None) 
         if not aspect_lib.is_valid(aspect):
             raise HTTPException(status_code=400, detail=f"Unknown aspect ratio: {aspect}")
         out["aspect"] = aspect
-    if out.get("camera_pose") is not None:
-        pose = str(out["camera_pose"]).strip()
-        if pose not in CAMERA_POSES:
-            raise HTTPException(status_code=400, detail=f"Unknown camera move: {pose}")
-        out["camera_pose"] = pose
     return out
 
 
