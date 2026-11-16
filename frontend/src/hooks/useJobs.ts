@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QueryDocumentSnapshot } from "firebase/firestore";
 import { useAuth } from "../contexts/AuthContext";
+import { publicApi } from "../services/api";
 import { watchJobs, watchJobsPage, watchJob } from "../services/jobs";
 import type { JobItem } from "../types";
 
@@ -96,6 +97,17 @@ export function useJob(jobId: string) {
     });
     return unsub;
   }, [jobId]);
+
+  // Keep the backend awake while a render is queued/processing so RunPod
+  // callbacks never hit a sleeping free-tier web instance.
+  useEffect(() => {
+    if (!job || (job.status !== "queued" && job.status !== "processing")) return;
+    publicApi.health().catch(() => undefined);
+    const id = window.setInterval(() => {
+      publicApi.health().catch(() => undefined);
+    }, 45000);
+    return () => window.clearInterval(id);
+  }, [job?.status]);
 
   return { job, loading };
 }

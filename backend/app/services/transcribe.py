@@ -32,6 +32,8 @@ def make_transcriber(uid: str, workspace_id: str, storage, settings, job_id: str
         global _DISABLED_UNTIL
         if settings.whisper_backend != "runpod":
             return None
+        if getattr(settings, "studio_local", False):
+            return None
         if not settings.runpod_enabled or settings.runpod_fake:
             return None
         if time.time() < _DISABLED_UNTIL:

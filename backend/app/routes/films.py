@@ -112,6 +112,7 @@ async def create_film(
         style = package_service.normalize_style(film_outline.get("style") or style)
         characters = film_outline.get("characters") or []
         title = film_outline.get("title") or title
+        _validate_outline_ownership(film_outline, user.uid)
 
     # The Characters page promises "mention them by name": a saved character
     # named in the idea joins the cast, and every blank description/voice is
@@ -635,6 +636,7 @@ async def save_planning_plan(
         # wipes the storyboard instead of 422-"remove everything".
         outline, _issues = package_service.validate_package(plan)
         outline["scenes"] = []
+    _validate_outline_ownership(outline, user.uid)
     # The plan's characters become the project's cast. Portraits already locked
     # from earlier films survive a re-plan.
     projects_service.sync_cast(project_id, outline.get("characters") or [])
@@ -719,10 +721,12 @@ def _validate_ref(uid: str, ref: str) -> str:
     can only point at a file Vidyra actually stored for this user, and only at
     an image — a character needs a face, not an audio clip.
     """
-    ref = (ref or "").strip()
+    ref = (ref or "").strip().replace("\\", "/")
     if not ref:
         return ""
-    if not ref.startswith(tuple(f"{p}{uid}/" for p in characters_service.REF_PREFIXES)):
+    if ".." in ref.split("/") or not ref.startswith(
+        tuple(f"{p}{uid}/" for p in characters_service.REF_PREFIXES)
+    ):
         raise HTTPException(
             status_code=400, detail=f"Reference image does not belong to you: {ref}"
         )
@@ -731,6 +735,20 @@ def _validate_ref(uid: str, ref: str) -> str:
             status_code=400, detail="A character reference must be an image file."
         )
     return ref
+
+
+def _validate_outline_ownership(outline: dict, uid: str) -> None:
+    """Ensure every character voice and scene reference_image belongs to uid."""
+    for c in outline.get("characters") or []:
+        if isinstance(c, dict):
+            voice = str(c.get("voice") or "").strip()
+            if voice:
+                voice_refs.owned_clone_ref(voice, uid)
+    for sc in outline.get("scenes") or []:
+        if isinstance(sc, dict):
+            ref = str(sc.get("reference_image") or "").strip()
+            if ref:
+                sc["reference_image"] = _validate_ref(uid, ref)
 
 
 @router.get("/characters", response_model=list[CharacterOut])

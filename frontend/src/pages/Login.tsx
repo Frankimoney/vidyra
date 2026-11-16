@@ -93,15 +93,18 @@ export default function Login() {
         margin: "0 auto",
       }}
     >
-      <div style={{ marginBottom: 28, textAlign: "center" }}>
+      <div style={{ marginBottom: 26, textAlign: "center" }}>
+        <div className="pill-badge" style={{ marginBottom: 14 }}>
+          AI Video Studio
+        </div>
         <div
           className="logo"
-          style={{ fontSize: "2.2rem", justifyContent: "center", width: "100%" }}
+          style={{ fontSize: "2.35rem", justifyContent: "center", width: "100%" }}
         >
           vi<span className="bolt">dyra</span>
         </div>
-        <p className="muted" style={{ margin: "10px 0 0", fontSize: "0.95rem" }}>
-          Turn sports stories into videos
+        <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.95rem" }}>
+          Direct stories, characters, and vertical videos in minutes
         </p>
       </div>
 

@@ -154,7 +154,7 @@ export default function Workspace() {
         </div>
       </header>
 
-      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1.3fr) minmax(260px, 0.8fr)" }}>
+      <div className="workspace-grid">
         <div style={{ display: "grid", gap: 14, minWidth: 0 }}>
           <Card>
             <h3 className="section-title" style={{ marginTop: 0 }}>

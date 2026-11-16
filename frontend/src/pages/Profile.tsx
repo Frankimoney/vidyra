@@ -119,15 +119,15 @@ export default function Profile() {
 
       <div className="card">
         <div className="spread" style={{ padding: "6px 0" }}>
-          <span>Vidyra</span>
-          <span className="faint">
-            <BoltIcon size={14} /> v0.1.0
+          <span>Vidyra Studio</span>
+          <span className="faint" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <BoltIcon size={14} /> v1.0.0
           </span>
         </div>
         <div className="divider" />
         <div className="spread" style={{ padding: "6px 0" }}>
-          <span>Processing backend</span>
-          <span className="faint">Oracle Cloud</span>
+          <span>GPU Engine</span>
+          <span className="faint">RunPod Serverless</span>
         </div>
         <div className="divider" />
         <div

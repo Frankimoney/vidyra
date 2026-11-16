@@ -43,9 +43,13 @@ export function StudioQuotaMeter({ compact }: { compact?: boolean }) {
         alignItems: "center",
         gap: 6,
         fontSize: "0.76rem",
-        padding: "4px 8px",
+        fontWeight: 600,
+        padding: "5px 11px",
         borderRadius: 999,
-        background: low ? "rgba(248,113,113,0.15)" : "rgba(16,185,129,0.12)",
+        border: low
+          ? "1px solid rgba(248,113,113,0.32)"
+          : "1px solid rgba(52,211,153,0.26)",
+        background: low ? "rgba(248,113,113,0.14)" : "rgba(16,185,129,0.12)",
         color: low ? "var(--danger, #f87171)" : "var(--text)",
         whiteSpace: "nowrap",
       }}

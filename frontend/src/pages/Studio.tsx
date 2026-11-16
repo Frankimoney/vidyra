@@ -51,6 +51,11 @@ const PROMPT_COPY: Record<StudioTool, { label: string; placeholder: string }> = 
     placeholder:
       "How the still should move — e.g. “slow push-in”, “hair in the wind”, “camera drifts left”…",
   },
+  txt2video: {
+    label: "Video prompt",
+    placeholder:
+      "Describe the clip to generate — subject, motion, camera movement, lighting…",
+  },
   lipsync: {
     label: "Scene prompt",
     placeholder:

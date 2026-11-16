@@ -786,7 +786,14 @@ class FilmWorker:
                     p = portraits.get((match.get("name") or "").strip().lower())
                     if p:
                         locked_ref = {"path": p, "role": "reference"}
-            custom_ref = str(sc.get("reference_image") or "").strip()
+            custom_ref = str(sc.get("reference_image") or "").strip().replace("\\", "/")
+            if custom_ref and (
+                ".." in custom_ref.split("/")
+                or not custom_ref.startswith(
+                    (f"media/{uid}/", f"studio/{uid}/", f"videos/{uid}/")
+                )
+            ):
+                custom_ref = ""
             if custom_ref:
                 image_path = custom_ref
             elif online_ref:

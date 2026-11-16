@@ -72,13 +72,14 @@ def daily_used(uid: str, day: str | None = None) -> int:
     """AI runs the user has spent so far today across all tools.
 
     Every GPU call the worker or the Studio tab makes creates one run doc, so
-    the daily budget is the count of docs stamped today. limit=200 sits well
-    above the real ceiling, keeping the count exact for sensible budgets.
+    the daily budget is the count of docs stamped today (including runs the
+    user later deleted from their history). limit=200 sits well above the real
+    ceiling, keeping the count exact for sensible budgets.
     """
     day = day or _now_stamp()[:10]
     return sum(
         1
-        for r in list_runs(uid, limit=200)
+        for r in list_runs(uid, limit=200, include_deleted=True)
         if (r.get("createdAt") or "").startswith(day)
     )
 
@@ -86,11 +87,16 @@ def daily_used(uid: str, day: str | None = None) -> int:
 def get_run(run_id: str) -> dict | None:
     if firebase.db is None:
         doc = _memory_store.get(run_id)
-        return dict(doc) if doc else None
+        if not doc or doc.get("deleted"):
+            return None
+        return dict(doc)
     snap = _db().collection(COLLECTION).document(run_id).get()
     if not snap.exists:
         return None
-    return snap.to_dict()
+    doc = snap.to_dict() or {}
+    if doc.get("deleted"):
+        return None
+    return doc
 
 
 def list_active_runs(uid: str, job_id: str = "") -> list:
@@ -104,9 +110,13 @@ def list_active_runs(uid: str, job_id: str = "") -> list:
     ]
 
 
-def list_runs(uid: str, limit: int = 30) -> list:
+def list_runs(uid: str, limit: int = 30, include_deleted: bool = False) -> list:
     if firebase.db is None:
-        items = [(run_id, d) for run_id, d in _memory_store.items() if d.get("userId") == uid]
+        items = [
+            (run_id, d)
+            for run_id, d in _memory_store.items()
+            if d.get("userId") == uid and (include_deleted or not d.get("deleted"))
+        ]
         items.sort(key=lambda pair: pair[1].get("createdAt", ""), reverse=True)
         return [{**d, "runId": run_id} for run_id, d in items[:limit]]
     snaps = (
@@ -117,7 +127,13 @@ def list_runs(uid: str, limit: int = 30) -> list:
         .limit(limit)
         .get()
     )
-    return [s.to_dict() | {"runId": s.id} for s in snaps]
+    out = []
+    for s in snaps:
+        d = s.to_dict() or {}
+        if not include_deleted and d.get("deleted"):
+            continue
+        out.append(d | {"runId": s.id})
+    return out
 
 
 def update_run(run_id: str, **fields):
@@ -132,9 +148,14 @@ def update_run(run_id: str, **fields):
 
 def delete_run(run_id: str) -> None:
     if firebase.db is None:
-        _memory_store.pop(run_id, None)
+        doc = _memory_store.get(run_id)
+        if doc is not None:
+            doc["deleted"] = True
+            doc["updatedAt"] = _now_stamp()
         return
-    _db().collection(COLLECTION).document(run_id).delete()
+    _db().collection(COLLECTION).document(run_id).update(
+        {"deleted": True, "updatedAt": _now_stamp()}
+    )
 
 
 def store_artifact(run_id: str, entry: dict):

@@ -448,12 +448,7 @@ class VideoWorker:
     def studio_quota_remaining(self, uid: str) -> int:
         from ..services import studio as studio_service
 
-        today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
-        used = sum(
-            1
-            for r in studio_service.list_runs(uid, limit=200)
-            if (r.get("createdAt") or "").startswith(today)
-        )
+        used = studio_service.daily_used(uid)
         return max(0, int(self.settings.studio_max_runs_per_day) - used)
 
     def _voice_or_clone(self, name) -> str:

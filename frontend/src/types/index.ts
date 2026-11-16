@@ -413,6 +413,7 @@ export type StudioTool =
   | "img2img"
   | "character"
   | "img2video"
+  | "txt2video"
   | "lipsync"
   | "voiceclone";
 

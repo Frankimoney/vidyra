@@ -419,17 +419,46 @@ async def create_job(
     # Cloned voices ("clone:<storagePath>") in the narrator slot, per-scene
     # voice, or a character's voice must belong to this user.
     from ..services.voice_refs import owned_clone_ref
+    from pipeline.narration import is_clone_voice
 
-    owned_clone_ref(str(settings.get("voice") or ""), user.uid)
+    clone_voices: set[str] = set()
+    v_main = str(settings.get("voice") or "").strip()
+    if v_main:
+        owned_clone_ref(v_main, user.uid)
+        if is_clone_voice(v_main):
+            clone_voices.add(v_main)
     # `characters` and `scenes` are lists of plain dicts (see JobCreate), so
     # `getattr(item, "voice", "")` silently yields "" and this ownership check
     # never ran. `.get` is what the normalizers below actually read.
     for char in payload.characters or []:
         if isinstance(char, dict):
-            owned_clone_ref(str(char.get("voice") or ""), user.uid)
+            cv = str(char.get("voice") or "").strip()
+            owned_clone_ref(cv, user.uid)
+            if is_clone_voice(cv):
+                clone_voices.add(cv)
+    for char in characters or []:
+        if isinstance(char, dict):
+            cv = str(char.get("voice") or "").strip()
+            owned_clone_ref(cv, user.uid)
+            if is_clone_voice(cv):
+                clone_voices.add(cv)
     for scene in payload.scenes or []:
         if isinstance(scene, dict):
-            owned_clone_ref(str(scene.get("voice") or ""), user.uid)
+            sv = str(scene.get("voice") or "").strip()
+            owned_clone_ref(sv, user.uid)
+            if is_clone_voice(sv):
+                clone_voices.add(sv)
+    if clone_voices and not s.runpod_fake:
+        used = studio_service.daily_used(user.uid)
+        remaining = max(0, int(s.studio_max_runs_per_day) - used)
+        if remaining < len(clone_voices):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Cloned voices need {len(clone_voices)} AI Studio run(s), "
+                    f"but only {remaining} of your daily quota ({s.studio_max_runs_per_day}) is left."
+                ),
+            )
 
     niche = profiles.get_page_name(user.uid)
     job_id = jobs_service.create_job(
@@ -599,6 +628,8 @@ async def create_face_job(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Overlay a webcam recording onto an already-finished video."""
+    s: Settings = request.app.state.settings
+    rate_limiter.check(user.uid, s.rate_limit_per_min)
     parent = jobs_service.get_job(job_id)
     if not parent:
         raise HTTPException(status_code=404, detail="Job not found.")

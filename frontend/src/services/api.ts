@@ -624,6 +624,7 @@ export const api = {
 };
 
 export const publicApi = {
+  health: () => publicRequest<{ status: string }>("/health"),
   watch: (token: string) =>
     publicRequest<PublicShare>(`/public/video/${encodeURIComponent(token)}`),
 };

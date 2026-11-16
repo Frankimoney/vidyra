@@ -142,11 +142,78 @@ def test_owned_media_guard():
     check("empty segment rejected", code("media/dev-user//x.png") == 400)
 
 
+def test_production_hardening():
+    """Verify series media ownership, film package ref ownership, quota soft-delete, and studio_local transcribe guard."""
+    print("production hardening guards:")
+    import json
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.routes.films import _validate_outline_ownership
+    from app.routes.series import validate_series_payload
+    from app.services import studio as studio_service
+    from app.services.transcribe import make_transcriber
+    from app.config import Settings
+
+    s = Settings()
+
+    # 1. Series payload ownership
+    try:
+        validate_series_payload(
+            {"script": "hi", "media": ["media/other-user/secret.mp4"]},
+            "dev-user",
+            storage=None,
+            s=s,
+        )
+        check("series rejects foreign media", False)
+    except HTTPException as exc:
+        check("series rejects foreign media", exc.status_code == 400)
+
+    # 2. Film package reference_image & clone voice ownership
+    try:
+        _validate_outline_ownership(
+            {"scenes": [{"reference_image": "media/other-user/pic.png"}]},
+            "dev-user",
+        )
+        check("film outline rejects foreign reference_image", False)
+    except HTTPException as exc:
+        check("film outline rejects foreign reference_image", exc.status_code == 400)
+
+    try:
+        _validate_outline_ownership(
+            {"characters": [{"name": "Host", "voice": "clone:media/other-user/v.wav"}]},
+            "dev-user",
+        )
+        check("film outline rejects foreign clone voice", False)
+    except HTTPException as exc:
+        check("film outline rejects foreign clone voice", exc.status_code == 400)
+
+    # 3. Deleting a Studio run does not refund daily quota
+    studio_service._memory_store.clear()
+    rid = studio_service.create_run("quota-user", "txt2img", "sdxl", "cat", {}, [])
+    check("daily_used counts created run", studio_service.daily_used("quota-user") == 1)
+    studio_service.delete_run(rid)
+    check("deleted run hidden from get_run", studio_service.get_run(rid) is None)
+    check("deleted run hidden from list_runs", studio_service.list_runs("quota-user") == [])
+    check("daily_used preserved after delete_run", studio_service.daily_used("quota-user") == 1)
+    studio_service._memory_store.clear()
+
+    # 4. Merged-pod studio_local transcribe guard avoids self-deadlock
+    local_settings = SimpleNamespace(
+        whisper_backend="runpod",
+        studio_local=True,
+        runpod_enabled=True,
+        runpod_fake=False,
+    )
+    fn = make_transcriber("u1", "", None, local_settings)
+    check("studio_local transcribe returns None immediately", fn("any.wav") is None)
+
+
 def main() -> int:
     test_share_tokens()
     test_signed_urls()
     test_path_traversal()
     test_owned_media_guard()
+    test_production_hardening()
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")

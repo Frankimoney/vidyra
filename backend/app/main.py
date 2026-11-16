@@ -50,21 +50,13 @@ async def _series_loop(app: FastAPI):
     while True:
         try:
             for doc in series_service.due_series():
-                payload = doc.get("payload") or {}
-                workspace_id = (doc.get("workspaceId") or payload.get("workspace_id") or "").strip()
-                job_id = jobs_service.create_job(
-                    uid=doc.get("userId") or "",
-                    title=str(payload.get("title") or doc.get("name") or "Recurring video")[:120],
-                    script=str(payload.get("script") or ""),
-                    media=list(payload.get("media") or []),
-                    settings=dict(payload.get("settings") or {}),
-                    cover=payload.get("cover"),
-                    niche=str(payload.get("niche") or ""),
-                    scenes=list(payload.get("scenes") or []) or None,
-                    characters=list(payload.get("characters") or []) or None,
-                    workspace_id=workspace_id,
-                )
-                await app.state.worker.submit(job_id)
+                try:
+                    job_id = series.create_job_from_series(
+                        doc, app.state.storage, app.state.settings
+                    )
+                    await app.state.worker.submit(job_id)
+                except Exception as item_exc:
+                    print(f"[series] skipped {doc.get('seriesId')}: {item_exc}")
                 series_service.mark_ran(doc.get("seriesId") or "")
         except Exception as exc:
             print(f"[series] scheduler error: {exc}")
