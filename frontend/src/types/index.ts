@@ -81,6 +81,8 @@ export interface JobItem {
     posterFileSize?: number;
   } | null;
   error?: string | null;
+  /** Machine-readable failure reason, e.g. "quota_exceeded". */
+  errorCode?: string;
 }
 
 export interface UploadedMedia {

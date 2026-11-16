@@ -238,6 +238,23 @@ class FilmError(RuntimeError):
     pass
 
 
+class QuotaExceeded(FilmError):
+    """The film needs more daily AI Studio runs than the user has left.
+
+    Carries ``code`` so the failure surfaces to the UI as a distinct
+    "daily limit reached" state instead of a generic error, and so the user
+    gets told *why* the render stopped before any GPU run is spent.
+    """
+
+    code = "quota_exceeded"
+
+    def __init__(self, message: str, *, needed: int = 0, remaining: int = 0, limit: int = 0):
+        super().__init__(message)
+        self.needed = needed
+        self.remaining = remaining
+        self.limit = limit
+
+
 def acting_scene_count(scenes: list, acting: bool) -> int:
     """Dialogue scenes, which each cost an extra acting/lip-sync GPU run."""
     if not acting:
@@ -608,7 +625,6 @@ class FilmWorker:
         # film can never die part-way through for want of quota.
         lip_sync = bool((job.get("film") or {}).get("lip_sync", True))
         acting = lip_sync and (self.settings.runpod_enabled or self.settings.runpod_fake)
-        acting_scenes = acting_scene_count(scenes, acting)
         lock_chars = [
             c for c in (outline.get("characters") or [])
             if isinstance(c, dict) and (c.get("name") or "").strip()
@@ -639,11 +655,14 @@ class FilmWorker:
         )
         remaining = self._studio_quota_remaining(uid)
         if remaining < runs_needed:
-            raise FilmError(
-                f"Not enough daily AI Studio quota for {n} scenes "
-                f"({runs_needed} GPU runs needed incl. {acting_scenes} acting/lip-sync "
-                f"passes, {remaining} remaining). "
-                "Raise STUDIO_MAX_RUNS_PER_DAY or try a shorter film."
+            limit = int(self.settings.studio_max_runs_per_day)
+            raise QuotaExceeded(
+                f"This film needs {runs_needed} AI Studio runs, but only "
+                f"{remaining} of today's {limit} are left. Try a shorter film, "
+                "or come back tomorrow when your daily limit resets.",
+                needed=runs_needed,
+                remaining=remaining,
+                limit=limit,
             )
 
         media_root = os.path.join(work_dir, "scenes")
@@ -1187,10 +1206,14 @@ class FilmWorker:
         runs_needed += len({v for v in turn_voices if is_clone_voice(v)})
         remaining = self._studio_quota_remaining(uid)
         if remaining < runs_needed:
-            raise FilmError(
-                f"Not enough daily AI Studio quota for {n} talking turns "
-                f"(~{runs_needed} GPU runs needed, {remaining} remaining). "
-                "Raise STUDIO_MAX_RUNS_PER_DAY or try a shorter episode."
+            limit = int(self.settings.studio_max_runs_per_day)
+            raise QuotaExceeded(
+                f"This episode needs about {runs_needed} AI Studio runs, but only "
+                f"{remaining} of today's {limit} are left. Try a shorter episode, "
+                "or come back tomorrow when your daily limit resets.",
+                needed=runs_needed,
+                remaining=remaining,
+                limit=limit,
             )
 
         clone_banks = self.video_worker._clone_line_banks(

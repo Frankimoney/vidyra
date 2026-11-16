@@ -495,6 +495,12 @@ function FailedView({ job }: { job: any }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const interrupted = /interrupted/i.test(job.error || "");
+  // Quota failures are a distinct, actionable state: retrying now just burns
+  // another attempt, so we explain the limit and point at Studio instead of
+  // offering the generic retry.
+  const quota =
+    job.errorCode === "quota_exceeded" ||
+    /AI Studio (runs|limit|quota)/i.test(job.error || job.message || "");
 
   async function retry() {
     setBusy(true);
@@ -524,21 +530,55 @@ function FailedView({ job }: { job: any }) {
 
   return (
     <div className="stack-v fade-up" style={{ paddingTop: 30 }}>
-      <div className="card" style={{ textAlign: "center", borderColor: "rgba(248,113,113,0.35)" }}>
-        <div style={{ fontSize: 34 }}>{interrupted ? "🔌" : "⚠️"}</div>
-        <h2 style={{ margin: "8px 0 4px" }}>{interrupted ? "This video was interrupted" : "Something went wrong"}</h2>
+      <div
+        className="card"
+        style={{
+          textAlign: "center",
+          borderColor: quota ? "rgba(251,191,36,0.45)" : "rgba(248,113,113,0.35)",
+        }}
+      >
+        <div style={{ fontSize: 34 }}>{quota ? "⏳" : interrupted ? "🔌" : "⚠️"}</div>
+        <h2 style={{ margin: "8px 0 4px" }}>
+          {quota
+            ? "Daily AI Studio limit reached"
+            : interrupted
+              ? "This video was interrupted"
+              : "Something went wrong"}
+        </h2>
         <p className="muted" style={{ fontSize: "0.9rem" }}>
-          {interrupted
-            ? "The app was closed or lost power while this was rendering, so it stopped partway. Your script and uploads are still saved."
-            : job.error || job.message || "The video could not be generated."}
+          {quota
+            ? job.error ||
+              job.message ||
+              "You've used today's AI Studio runs. Your daily limit resets tomorrow."
+            : interrupted
+              ? "The app was closed or lost power while this was rendering, so it stopped partway. Your script and uploads are still saved."
+              : job.error || job.message || "The video could not be generated."}
         </p>
+        {quota && (
+          <p className="faint" style={{ fontSize: "0.8rem", marginBottom: 0 }}>
+            Try a shorter film, or come back tomorrow when your daily limit resets.
+          </p>
+        )}
       </div>
-      <Button variant="primary" loading={busy} onClick={retry}>
-        ↻ Retry with the same settings
-      </Button>
-      <Link to="/studio/create" style={{ textDecoration: "none" }}>
-        <Button variant="ghost">Start Something New</Button>
-      </Link>
+      {quota ? (
+        <>
+          <Link to="/studio/create" style={{ textDecoration: "none" }}>
+            <Button variant="primary">Open AI Studio</Button>
+          </Link>
+          <Link to="/library" style={{ textDecoration: "none" }}>
+            <Button variant="ghost">Back to Library</Button>
+          </Link>
+        </>
+      ) : (
+        <>
+          <Button variant="primary" loading={busy} onClick={retry}>
+            ↻ Retry with the same settings
+          </Button>
+          <Link to="/studio/create" style={{ textDecoration: "none" }}>
+            <Button variant="ghost">Start Something New</Button>
+          </Link>
+        </>
+      )}
     </div>
   );
 }

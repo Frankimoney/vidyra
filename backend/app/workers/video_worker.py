@@ -817,6 +817,7 @@ class VideoWorker:
                 stage="failed",
                 message=message,
                 error=message,
+                error_code=getattr(exc, "code", "") or "",
             )
         except Exception:
             pass  # job was deleted while rendering
