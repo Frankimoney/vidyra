@@ -62,7 +62,19 @@ RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git \
 # 48GB-only voice clone (open-source, MIT): Chatterbox Turbo zero-shot TTS.
 # ~0.5B params, needs seconds of ref audio. Runs in the same pod beside
 # ComfyUI; the worker routes tool="voiceclone" past ComfyUI straight here.
-RUN pip install --no-cache-dir chatterbox-tts torchaudio soundfile || true
+#
+# Installed with --no-deps ON PURPOSE. chatterbox-tts hard-pins
+# torch==2.6.0 / torchaudio==2.6.0 (plus transformers==5.2.0,
+# safetensors==0.5.3). Installing it normally downgrades ComfyUI's torch
+# (2.15.0, cu13) to a cu12 build, which then fails to import with:
+#   ImportError: libtorch_cuda.so: undefined symbol: ncclCommResume
+# (a torch/NCCL ABI mismatch). So we pull chatterbox and its leaf deps without
+# letting them touch the torch stack. If a dep is missing, worker.py's
+# voiceclone path degrades gracefully (it wraps the import in try/except).
+RUN pip install --no-cache-dir --no-deps chatterbox-tts \
+    && pip install --no-cache-dir librosa==0.11.0 soundfile pykakasi==2.3.0 pyloudnorm omegaconf \
+    && pip install --no-cache-dir --no-deps s3tokenizer resemble-perth conformer==0.3.2 \
+    || true
 
 # ---- Lip sync --------------------------------------------------------
 # Wav2Lip. Upstream pins librosa==0.7.0 / numpy==1.17.1, neither of which
