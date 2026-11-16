@@ -112,14 +112,76 @@ def _post_file(url: str, file_path: str, token: str):
 # ComfyUI client
 # ---------------------------------------------------------------------------
 
+def _comfy_log_tail(lines: int = 20) -> str:
+    try:
+        with open("/tmp/comfyui.log", encoding="utf-8", errors="ignore") as fh:
+            tail = fh.readlines()[-lines:]
+        return "".join(tail).strip()
+    except OSError:
+        return ""
+
+
+def _comfy_process_alive() -> bool:
+    try:
+        res = subprocess.run(
+            ["pgrep", "-f", "/ComfyUI/main.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return res.returncode == 0
+    except Exception:
+        return True
+
+
+def _restart_comfy() -> None:
+    """Start ComfyUI with PYTHONPATH unset so /app/backend/app never shadows /ComfyUI/app."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    port = os.getenv("COMFY_PORT", "8188")
+    try:
+        log_fh = open("/tmp/comfyui.log", "ab")
+        subprocess.Popen(
+            [
+                sys.executable,
+                "/ComfyUI/main.py",
+                "--listen",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--disable-auto-launch",
+                "--highvram",
+            ],
+            cwd="/ComfyUI" if os.path.isdir("/ComfyUI") else None,
+            env=env,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+        )
+    except Exception:
+        pass
+
+
 def _wait_for_comfy():
-    for _ in range(120):
+    restarted = False
+    for attempt in range(90):
         try:
             _http_json(f"{COMFY_URL}/system_stats", timeout=5)
             return
         except Exception:
+            if not _comfy_process_alive():
+                if not restarted:
+                    restarted = True
+                    _restart_comfy()
+                    time.sleep(3)
+                    continue
+                tail = _comfy_log_tail()
+                raise RuntimeError(
+                    f"ComfyUI exited during startup"
+                    + (f":\n{tail}" if tail else "")
+                )
             time.sleep(2)
-    raise RuntimeError("ComfyUI did not become ready")
+    tail = _comfy_log_tail()
+    raise RuntimeError(
+        "ComfyUI did not become ready" + (f":\n{tail}" if tail else "")
+    )
 
 
 def _run_workflow(graph: dict, on_done=None) -> list[str]:
@@ -483,14 +545,15 @@ def _run_lipsync(inputs, base, art_path, token, report, start):
 
     report(85, "Streaming result back")
     uploaded = []
-    if base and art_path:
+    if base and art_path and not inputs.get("_local_publish"):
         _post_file(f"{base}{art_path}", out_path, token)
-        uploaded.append(os.path.basename(out_path))
+    uploaded.append(os.path.basename(out_path))
     report(95, "Done")
     return {
         "status": "ok",
         "elapsed": round(time.time() - start, 1),
         "uploads": uploaded,
+        "output_paths": [out_path],
         "checkpoint": os.path.basename(ckpt),
     }
 
@@ -505,7 +568,14 @@ def handler(job):
     art_path = callback.get("artifact_path", "")
     prog_path = callback.get("progress_path", "")
 
+    local_cb = inputs.get("_on_progress")
+
     def report(progress: int, message: str):
+        if callable(local_cb):
+            try:
+                local_cb(progress, message)
+            except Exception:
+                pass
         if not base or not prog_path or FAKE:
             return
         try:
@@ -559,13 +629,15 @@ def handler(job):
 
         report(80, "Streaming result back")
         uploaded = []
+        output_paths = []
         for name in out_files:
             local_out = os.path.join(OUTPUT_DIR, name)
             if not os.path.isfile(local_out):
                 continue
-            if base and art_path:
+            if base and art_path and not inputs.get("_local_publish"):
                 _post_file(f"{base}{art_path}", local_out, token)
             uploaded.append(name)
+            output_paths.append(local_out)
     except Exception as exc:
         report(99, f"Worker error: {exc}")
         return {"status": "error", "error": str(exc), "elapsed": round(time.time() - start, 1)}
@@ -575,6 +647,7 @@ def handler(job):
         "status": "ok",
         "elapsed": round(time.time() - start, 1),
         "uploads": uploaded,
+        "output_paths": output_paths,
     }
 
 
@@ -739,11 +812,16 @@ def _run_voiceclone(inputs, base, art_path, token, report, start):
     except Exception as exc:
         return {"status": "error", "error": f"could not save wav: {exc}"}
     uploaded = []
-    if base and art_path:
+    if base and art_path and not inputs.get("_local_publish"):
         _post_file(f"{base}{art_path}", out_path, token)
-        uploaded.append(os.path.basename(out_path))
+    uploaded.append(os.path.basename(out_path))
     report(95, "Done")
-    result = {"status": "ok", "elapsed": round(time.time() - start, 1), "uploads": uploaded}
+    result = {
+        "status": "ok",
+        "elapsed": round(time.time() - start, 1),
+        "uploads": uploaded,
+        "output_paths": [out_path],
+    }
     if len(texts) > 1:
         # Per-line durations let the backend split this track without Whisper.
         try:

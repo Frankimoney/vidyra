@@ -17,6 +17,13 @@ RUN apt-get -o Acquire::Retries=5 update \
 
 WORKDIR /
 
+# Strip Debian dist-packages lacking RECORD files BEFORE any pip install runs.
+# Running this later in the build would delete packages (PyYAML, Pillow, scipy,
+# requests, ...) that ComfyUI's pip install saw as "already satisfied" in
+# /usr/lib/python3*/dist-packages.
+COPY deploy/runpod/clean_debian_pkgs.py /clean_debian_pkgs.py
+RUN python /clean_debian_pkgs.py
+
 # Serverless runtime + faster-whisper are needed by worker.py itself, not by
 # ComfyUI, so install them before the large model/custom-node layers.
 COPY deploy/runpod/requirements.txt /tmp/runpod-requirements.txt
@@ -102,10 +109,6 @@ RUN chmod +x /setup_model_links.sh
 # (STUDIO_LOCAL=1) instead of submitting sub-jobs to itself, which would
 # deadlock behind the running job when workersMax=1.
 COPY backend/requirements.txt /app/backend/requirements.txt
-# The CUDA base ships some libs via apt (PyJWT, grpcio, ...) with no RECORD, so
-# pip cannot uninstall them and aborts. Drop those Debian copies first.
-COPY deploy/runpod/clean_debian_pkgs.py /clean_debian_pkgs.py
-RUN python /clean_debian_pkgs.py
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend /app/backend
 COPY pipeline /app/pipeline

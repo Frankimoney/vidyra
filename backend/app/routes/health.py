@@ -21,7 +21,7 @@ router = APIRouter()
 #: it. Throttled (it may PATCH RunPod and query Firestore) and run off the event
 #: loop so the health response itself never waits on RunPod.
 _last_reconcile = 0.0
-_RECONCILE_SECONDS = 120
+_RECONCILE_SECONDS = 30
 
 
 @router.get("/health", response_model=HealthOut)

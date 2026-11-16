@@ -721,6 +721,8 @@ class FilmWorker:
                     uid, {"name": name, "description": desc, "refImage": portraits[key]}
                 )
             except Exception as exc:
+                if "ComfyUI did not become ready" in str(exc) or "ComfyUI exited" in str(exc):
+                    raise
                 print(f"[film] portrait lock failed for {name} ({exc}); scenes fall back to txt2img")
         if portraits:
             jobs_service.update_job(job_id, filmPlot=outline)
@@ -1469,9 +1471,10 @@ class FilmWorker:
                     return path
                 last_error = FilmError(f"{tool} run finished without an output file.")
             else:
-                last_error = FilmError(
-                    f"{tool} run failed: {doc.get('error') or doc.get('message') or 'unknown error'}"
-                )
+                err_msg = str(doc.get("error") or doc.get("message") or "unknown error")
+                last_error = FilmError(f"{tool} run failed: {err_msg}")
+                if "ComfyUI did not become ready" in err_msg or "ComfyUI exited" in err_msg:
+                    raise last_error
             if attempt < retries:
                 msg = f"Adjusting direction and re-shooting · {title} (pass {attempt + 1}/{retries})"
                 self._report(job_id, stage="filming", progress=None, message=msg)

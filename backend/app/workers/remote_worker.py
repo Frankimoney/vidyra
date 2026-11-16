@@ -90,24 +90,62 @@ def endpoint_has_queued_jobs(settings, endpoint_id: str) -> bool:
     return int(jobs.get("inQueue") or 0) > 0
 
 
-def _has_active_jobs() -> bool:
-    """True while any render job is queued or processing.
+def _has_active_jobs(max_age_minutes: int = 35) -> bool:
+    """True while any non-stale render job or studio run is queued or processing.
 
-    Unknown counts as busy so a Firestore hiccup never releases a worker that a
-    running render still needs.
+    Jobs that have not updated in ``max_age_minutes`` are zombie records left
+    behind by a killed/timed-out pod; they are marked failed here so they never
+    keep ``workersMin=1`` pinned and billing forever.
     """
     try:
+        import datetime
+        from ..services import studio as studio_service
         from ..services.firebase import firebase
 
         if firebase.db is None:
             return True
-        snaps = (
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(minutes=max(5, int(max_age_minutes)))
+        ).isoformat()
+        active = False
+        for snap in (
             firebase.db.collection(jobs_service.COLLECTION)
             .where("status", "in", ["queued", "processing"])
-            .limit(1)
+            .limit(20)
             .get()
-        )
-        return len(snaps) > 0
+        ):
+            d = snap.to_dict() or {}
+            stamp = str(d.get("updatedAt") or d.get("createdAt") or "")
+            if stamp and stamp < cutoff:
+                jobs_service.update_job(
+                    snap.id,
+                    status="failed",
+                    stage="failed",
+                    message="Render timed out on GPU worker.",
+                    error="Render timed out on GPU worker.",
+                )
+            else:
+                active = True
+        for snap in (
+            firebase.db.collection(studio_service.COLLECTION)
+            .where("status", "in", ["queued", "processing"])
+            .limit(20)
+            .get()
+        ):
+            d = snap.to_dict() or {}
+            stamp = str(d.get("updatedAt") or d.get("createdAt") or "")
+            if stamp and stamp < cutoff:
+                studio_service.update_run(
+                    snap.id,
+                    status="failed",
+                    stage="failed",
+                    message="Studio run timed out on GPU worker.",
+                    error="Studio run timed out on GPU worker.",
+                )
+            else:
+                active = True
+        return active
     except Exception:
         return True
 
@@ -118,7 +156,8 @@ def release_endpoints_if_idle(settings) -> None:
     Safety net for a worker that crashed or timed out while pinned at
     workersMin=1: with no job running anywhere, nothing should keep billing.
     """
-    if _has_active_jobs():
+    timeout_mins = int(getattr(settings, "runpod_timeout_minutes", 30) or 30) + 5
+    if _has_active_jobs(max_age_minutes=timeout_mins):
         return
     from .studio_worker import rest_studio_endpoint
 
@@ -194,6 +233,7 @@ class PipelineWorker:
                 message="Could not start the render.",
                 error=str(exc),
             )
+            release_endpoints_if_idle(self.settings)
             return
         # The pod may already have moved the job to "processing"; only attach
         # the run id and message so we never clobber its newer state.

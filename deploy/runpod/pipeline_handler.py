@@ -68,32 +68,27 @@ def handler(event):
     if not job_id:
         return {"error": "job_id is required"}
 
-    try:
-        video, film = _build_workers()
-    except Exception as exc:
-        traceback.print_exc()
-        try:
-            jobs_service.update_job(
-                job_id,
-                status="failed",
-                stage="failed",
-                message="Render worker could not start.",
-                error=str(exc),
-            )
-        except Exception:
-            pass
-        return {"error": f"worker setup failed: {exc}"}
-
-    # Both endpoints refuse to scale up from zero, so keep them pinned for the
-    # whole render and release them in the finally below. In merged mode the
-    # API pins this same endpoint on submit, so we skip the redundant wake but
-    # MUST still release it, otherwise the endpoint stays at workersMin=1 and
-    # bills forever after the render finishes.
     local = getattr(settings, "studio_local", False)
     if not local:
         wake_pipeline_endpoint(settings)
         wake_studio_endpoint(settings)
     try:
+        try:
+            video, film = _build_workers()
+        except Exception as exc:
+            traceback.print_exc()
+            try:
+                jobs_service.update_job(
+                    job_id,
+                    status="failed",
+                    stage="failed",
+                    message="Render worker could not start.",
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+            return {"error": f"worker setup failed: {exc}"}
+
         job = video._load_job(job_id)
         if job.get("type") == "film":
             film._process(job_id)

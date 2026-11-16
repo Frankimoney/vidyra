@@ -307,9 +307,10 @@ class StudioWorker:
     def _run_local(self, run_id: str, run: dict, tool: str, on_progress=None):
         """Run one pass on the pod's own ComfyUI (merged mode).
 
-        Reuses the GPU worker's own handler so the workflow graph, artifact
-        streaming, and callback token are identical to a remote run; only the
-        transport changes (in-process call instead of a RunPod submit).
+        Reuses the GPU worker's own handler so the workflow graph is identical
+        to a remote run, but publishes artifacts directly to storage (R2) and
+        reports progress in-process so it never depends on an HTTP callback to
+        a sleeping web instance.
         """
         studio_service.update_run(
             run_id,
@@ -318,11 +319,67 @@ class StudioWorker:
             progress=5,
             message="Rendering on local GPU",
         )
+        if on_progress:
+            on_progress(5, "Rendering on local GPU")
+
+        def _local_progress(prog: int, msg: str):
+            studio_service.update_run(
+                run_id, stage="generating", progress=int(prog), message=str(msg)
+            )
+            if on_progress:
+                on_progress(int(prog), str(msg))
+
         payload = self._build_payload(run_id, run)
+        payload["_local_publish"] = True
+        payload["_on_progress"] = _local_progress
+        self._record_usage(run, tool, reference=run_id)
+
         worker = _load_comfy_worker()
         output = worker.handler({"input": payload})
         if isinstance(output, dict) and output.get("status") == "error":
             raise StudioError(f"GPU run failed: {output.get('error')}")
+
+        # Publish artifacts directly from the pod's output dir to storage (R2)
+        # if they weren't already stored via an HTTP callback.
+        existing = (studio_service.get_run(run_id) or {}).get("output") or {}
+        if not existing.get("artifacts") and isinstance(output, dict):
+            uid = run.get("userId", "unknown")
+            out_dir = getattr(worker, "OUTPUT_DIR", "/ComfyUI/output")
+            paths = list(output.get("output_paths") or [])
+            if not paths:
+                paths = [
+                    os.path.join(out_dir, name)
+                    for name in (output.get("uploads") or [])
+                ]
+            for local_out in paths:
+                if not local_out or not os.path.isfile(local_out):
+                    continue
+                filename = os.path.basename(local_out)
+                kind = classify_media(filename)
+                if kind is None:
+                    continue
+                rel = f"studio/{uid}/{run_id}/{filename}"
+                signed = self.storage.publish(local_out, rel)
+                duration = None
+                if kind in ("video", "audio"):
+                    from pipeline.utils import get_duration
+
+                    try:
+                        duration = round(get_duration(local_out), 2)
+                    except Exception:
+                        pass
+                studio_service.store_artifact(
+                    run_id,
+                    {
+                        "name": filename,
+                        "kind": kind,
+                        "storagePath": rel,
+                        "url": as_absolute(signed, self.settings.public_url),
+                        "size": os.path.getsize(local_out),
+                        "duration": duration,
+                    },
+                )
+
         if on_progress:
             on_progress(90, "Retrieving output")
         studio_service.update_run(
